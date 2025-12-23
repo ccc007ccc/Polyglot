@@ -7,20 +7,21 @@ from PySide6.QtCore import QObject, Signal
 
 from app.config import ConfigManager, TEMP_AUDIO
 from app.plugins.stt import create_stt_engine
+from app.services.lang_service import LanguageService # 导入
 
 class AudioService(QObject):
     log_signal = Signal(str)
-    status_signal = Signal(str, str) # text, color
+    status_signal = Signal(str, str)
     result_signal = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.cfg = ConfigManager()
+        self.ls = LanguageService() # 实例化
         self.audio = pyaudio.PyAudio()
         self.is_recording = False
         self.frames = []
         
-        # 策略模式：获取具体的 STT 引擎
         self.stt_engine = create_stt_engine(self.cfg.data)
 
     def get_input_devices(self):
@@ -40,28 +41,30 @@ class AudioService(QObject):
         return devices
 
     def init_engine(self):
-        self.log_signal.emit("正在初始化语音识别引擎...")
+        # 使用 tr()
+        self.log_signal.emit(self.ls.tr("log_init_engine"))
         try:
             self.stt_engine.initialize()
             if self.stt_engine.is_ready():
-                self.log_signal.emit("语音引擎加载完成")
+                self.log_signal.emit(self.ls.tr("log_engine_loaded"))
                 hk = self.cfg.get('hotkey_rec')
-                self.status_signal.emit(f"就绪 | 按 {hk} 说话", "#27ae60")
+                # 格式化字符串
+                self.status_signal.emit(self.ls.tr("status_ready_hint").format(hk), "#27ae60")
             else:
-                raise Exception("引擎初始化返回失败")
+                raise Exception("Init failed")
         except Exception as e:
-            self.log_signal.emit(f"引擎加载失败: {e}")
-            self.status_signal.emit("引擎错误", "#c0392b")
+            self.log_signal.emit(self.ls.tr("log_engine_fail").format(e))
+            self.status_signal.emit(self.ls.tr("status_engine_error"), "#c0392b")
 
     def start_record(self):
         if not self.stt_engine.is_ready(): 
-            self.log_signal.emit("错误：引擎未就绪")
             return
         if self.is_recording: return
 
         self.is_recording = True
         self.frames = []
-        self.status_signal.emit("🎤 正在录音...", "#e74c3c")
+        # 使用 tr()
+        self.status_signal.emit(self.ls.tr("status_listening"), "#e74c3c")
         
         if self.cfg.get("sound_cues"): winsound.Beep(800, 100)
         threading.Thread(target=self._record_loop, daemon=True).start()
@@ -71,7 +74,8 @@ class AudioService(QObject):
         self.is_recording = False
         
         if self.cfg.get("sound_cues"): winsound.Beep(500, 100)
-        self.status_signal.emit("⏳ 正在处理...", "#f39c12")
+        # 使用 tr()
+        self.status_signal.emit(self.ls.tr("status_processing"), "#f39c12")
         threading.Thread(target=self._process_audio, daemon=True).start()
     
     def toggle_record(self):
@@ -90,7 +94,7 @@ class AudioService(QObject):
                 data = stream.read(1024, exception_on_overflow=False)
                 self.frames.append(data)
         except Exception as e:
-            self.log_signal.emit(f"录音设备错误: {e}")
+            self.log_signal.emit(f"Mic Error: {e}")
         finally:
             if stream:
                 stream.stop_stream()
@@ -98,7 +102,7 @@ class AudioService(QObject):
 
     def _process_audio(self):
         if not self.frames or len(self.frames) < 5: 
-            self.status_signal.emit("时间太短", "#7f8c8d")
+            self.status_signal.emit(self.ls.tr("status_too_short"), "#7f8c8d")
             return
 
         try:
@@ -109,19 +113,18 @@ class AudioService(QObject):
             wf.writeframes(b''.join(self.frames))
             wf.close()
             
-            # 使用统一接口识别
             text = self.stt_engine.transcribe(TEMP_AUDIO)
             
             if text:
-                self.log_signal.emit(f"👂 识别原文: {text}")
+                self.log_signal.emit(self.ls.tr("log_trans_result").format(text))
                 self.result_signal.emit(text)
             else:
-                self.log_signal.emit("未检测到有效语音")
-                self.status_signal.emit("无语音内容", "#7f8c8d")
+                self.log_signal.emit(self.ls.tr("status_no_speech"))
+                self.status_signal.emit(self.ls.tr("status_no_speech"), "#7f8c8d")
                 
         except Exception as e:
-            self.log_signal.emit(f"处理出错: {e}")
-            self.status_signal.emit("出错", "#c0392b")
+            self.log_signal.emit(f"Process Error: {e}")
+            self.status_signal.emit(self.ls.tr("status_engine_error"), "#c0392b")
         finally:
             if os.path.exists(TEMP_AUDIO):
                 try: os.remove(TEMP_AUDIO)

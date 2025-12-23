@@ -1,13 +1,21 @@
 import os
 import sys
-import re  # 新增：用于正则处理
+import re
 import torch
 import logging
 import requests
 import importlib.util
+import warnings
 
-# 抑制 ModelScope 的下载进度条和繁琐日志
-logging.getLogger("modelscope").setLevel(logging.ERROR)
+# === 核心修改：彻底静默日志 ===
+# 1. 过滤 HuggingFace 的 Warning
+warnings.filterwarnings("ignore")
+
+# 2. 强制设置 Logger 级别为 CRITICAL (最高级别，只报崩溃错误)
+# 这样 "Downloading..." 之类的信息就不会显示了
+logging.getLogger("transformers").setLevel(logging.CRITICAL)
+logging.getLogger("modelscope").setLevel(logging.CRITICAL)
+logging.getLogger("funasr").setLevel(logging.CRITICAL)
 
 from app.core.interfaces import ISTTEngine
 
@@ -21,21 +29,22 @@ class FunASRSTT(ISTTEngine):
         }
 
     def _download_file(self, url, save_path):
-        """下载单个文件的辅助函数"""
-        print(f"📥 正在下载缺失文件: {os.path.basename(save_path)} ...")
+        # 仅在下载文件时保留 print，因为这个过程比较慢，用户需要知道进度
+        print(f"📥 Downloading: {os.path.basename(save_path)} ...")
         try:
             resp = requests.get(url, timeout=30)
             resp.raise_for_status()
             with open(save_path, "wb") as f:
                 f.write(resp.content)
-            print("✅ 下载成功")
+            print("✅ Download success")
             return True
         except Exception as e:
-            print(f"❌ 下载失败: {e}")
+            print(f"❌ Download failed: {e}")
             return False
 
     def initialize(self):
-        print("正在初始化 FunASR 引擎 (Fun-ASR-MLT-Nano-2512)...")
+        # 将这里的 print 改为标准输出，或者根据需要去掉
+        print("Initializing FunASR Engine...")
         
         try:
             import transformers
@@ -43,32 +52,30 @@ class FunASRSTT(ISTTEngine):
             from modelscope import snapshot_download
             from funasr import AutoModel
         except ImportError:
-            print("❌ 严重错误: 缺少必要依赖。请运行: pip install transformers sentencepiece modelscope funasr")
+            print("❌ Critical Error: Missing dependencies.")
             self._ready = False
             return
 
         try:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"FunASR 推理设备: {device}")
+            # 只显示设备信息，其他下载日志已被 logging.CRITICAL 屏蔽
+            print(f"Device: {device}")
 
             model_id = "FunAudioLLM/Fun-ASR-MLT-Nano-2512"
             
-            print(f"正在检查/下载模型权重: {model_id}")
+            # snapshot_download 的日志已被屏蔽，界面会很清爽
             model_dir = snapshot_download(model_id)
             model_dir = os.path.abspath(model_dir)
 
-            # === 自动下载 model.py ===
             model_py_path = os.path.join(model_dir, "model.py")
             if not os.path.exists(model_py_path):
-                print("⚠️ 检测到 model.py 缺失，尝试从官方 GitHub 获取...")
                 github_url = "https://raw.githubusercontent.com/FunAudioLLM/Fun-ASR/main/model.py"
                 success = self._download_file(github_url, model_py_path)
                 if not success:
-                    print("❌ 下载失败，请手动下载 model.py 到模型目录。")
+                    print("❌ Failed to get model.py")
                     self._ready = False
                     return
 
-            # === 手动加载 model.py ===
             if os.path.exists(model_py_path):
                 try:
                     if model_dir not in sys.path:
@@ -80,7 +87,6 @@ class FunASRSTT(ISTTEngine):
                         spec.loader.exec_module(module)
                 except Exception: pass
 
-            print("正在加载模型 (AutoModel)...")
             self.model = AutoModel(
                 model=model_dir,
                 trust_remote_code=True,
@@ -89,16 +95,15 @@ class FunASRSTT(ISTTEngine):
                 vad_kwargs={"max_single_segment_time": 30000},
                 punc_model="ct-punc-c",
                 device=device,
-                disable_update=True
+                disable_update=True,
+                log_level="ERROR" # 再次确保内部日志级别
             )
             
             self._ready = True
-            print("✅ FunASR 引擎加载完毕")
+            print("✅ FunASR Ready")
             
         except Exception as e:
-            print(f"❌ FunASR 加载崩溃: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ FunASR Crash: {e}")
             self._ready = False
 
     def transcribe(self, audio_path: str, language: str = "zh") -> str:
@@ -107,29 +112,20 @@ class FunASRSTT(ISTTEngine):
         
         try:
             target_lang = self.lang_map.get(language, "中文")
-            
             generate_kwargs = {
                 "input": audio_path,
                 "batch_size": 1, 
                 "cache": {},
                 "language": target_lang,
-                "itn": True
+                "itn": True,
             }
-
             res = self.model.generate(**generate_kwargs)
-            
             if res and isinstance(res, list) and len(res) > 0:
                 text = res[0].get('text', '')
-                
-                # === 修复：去除重复标点 ===
-                # 将 "？？" 替换为 "？"，"。。" 替换为 "。" 等
-                # 正则解释：([符号集合])\1+ 表示匹配该集合中连续出现2次以上的字符
                 text = re.sub(r'([？?。，,！!])\1+', r'\1', text)
-                
                 return text.strip()
             return ""
-        except Exception as e:
-            print(f"FunASR 识别错误: {e}")
+        except Exception:
             return ""
 
     def is_ready(self) -> bool:

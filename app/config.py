@@ -3,27 +3,26 @@ import json
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN_DIR = os.path.join(BASE_DIR, "bin")
-MODELS_DIR = os.path.join(BASE_DIR, "models")  # 新增：模型目录
+MODELS_DIR = os.path.join(BASE_DIR, "models")
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 TEMP_AUDIO = os.path.join(BASE_DIR, "temp_recording.wav")
 
-# 自动创建模型目录
 if not os.path.exists(MODELS_DIR):
     os.makedirs(MODELS_DIR)
 
-# 设置环境变量，让 ModelScope (FunASR) 将模型下载到本地 models 目录，而不是用户目录
 os.environ["MODELSCOPE_CACHE"] = MODELS_DIR
 
 if os.path.exists(BIN_DIR):
     os.environ["PATH"] += os.pathsep + BIN_DIR
 
 DEFAULT_CONFIG = {
+    # === 新增：界面语言 (auto, zh_CN, en_US) ===
+    "app_lang": "auto",
+
     "api_base": "https://api.deepseek.com",
     "api_key": "",
     "model": "deepseek-chat",
-    
-    # 默认引擎选择 (faster_whisper 或 funasr)
-    "stt_engine": "faster_whisper", 
+    "stt_engine": "faster_whisper",
     
     "hotkey_rec": "ctrl+b",
     "hotkey_send": "ctrl+n",
