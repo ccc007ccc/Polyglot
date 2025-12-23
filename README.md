@@ -1,4 +1,4 @@
-# Polyglot Pro | 智能同传助手 (AI Interpreter)
+# Polyglot | 智能同传助手 (AI Interpreter)
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-yellow.svg)
@@ -31,8 +31,8 @@
 ### 步骤
 1.  **克隆仓库**:
     ```bash
-    git clone [https://github.com/ccc007ccc/polyglot.git](https://github.com/ccc007ccc/polyglot.git)
-    cd polyglot
+    git clone https://github.com/ccc007ccc/Polyglot
+    cd Polyglot
     ```
 
 2.  **安装依赖**:
