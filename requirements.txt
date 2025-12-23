@@ -1,0 +1,10 @@
+PySide6
+pyqtdarktheme
+faster-whisper
+python-osc
+pypinyin
+keyboard
+requests
+tqdm
+pyaudio
+numpy
