@@ -5,16 +5,16 @@
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
-**Polyglot Pro** 是一个专为 VRChat 玩家、跨国会议及跨语言交流者设计的硬核实时 AI 同传终端。它集成了本地高性能语音识别（ASR）引擎与大语言模型（LLM）翻译能力，并通过 OSC 协议实现毫秒级的字幕投射。
+**Polyglot** 是一个专为 VRChat 玩家、跨国会议及跨语言交流者设计的硬核实时 AI 同传终端。它集成了本地高性能语音识别（ASR）引擎与大语言模型（LLM）翻译能力，并通过 OSC 协议实现毫秒级的字幕投射。
 
-> **Polyglot Pro** is a hardcore real-time AI simultaneous interpretation terminal designed for VRChat players and cross-language communication. It integrates local high-performance ASR engines with LLM translation capabilities, delivering millisecond-level subtitle projection via OSC.
+> **Polyglot** is a hardcore real-time AI simultaneous interpretation terminal designed for VRChat players and cross-language communication. It integrates local high-performance ASR engines with LLM translation capabilities, delivering millisecond-level subtitle projection via OSC.
 
 ## ✨ 核心特性 (Core Features)
 
 * **双核 ASR 引擎**:
     * 🚀 **Faster-Whisper**: 基于 CTranslate2 优化的 Whisper 模型，兼容性极强，资源占用低。
     * 🧠 **FunASR (阿里达摩院)**: 针对中文语境深度优化的工业级识别模型，识别率极高。
-* **AI 语境翻译**: 支持接入 OpenAI 接口规范的 LLM (如 DeepSeek, ChatGPT, Claude)，告别生硬机翻，支持 prompt 自定义。
+* **AI 语境翻译**: 支持接入 OpenAI 接口规范的 LLM (如 DeepSeek)，告别生硬机翻，支持 prompt 自定义。
 * **赛博朋克 HUD**:
     * 基于 PySide6 绘制的现代化悬浮窗，支持**鼠标穿透 (Click-through)** 模式。
     * 高度可定制：透明度、字体大小、边框强度及显隐逻辑。
