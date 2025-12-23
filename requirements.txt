@@ -8,3 +8,9 @@ requests
 tqdm
 pyaudio
 numpy
+funasr
+modelscope
+torch
+torchaudio
+transformers
+sentencepiece

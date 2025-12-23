@@ -1,27 +1,10 @@
-# Python artifacts
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
+*.wav
+bin/
 env/
 venv/
-.env
-
-# User Settings (CRITICAL: Protects your API Key)
 settings.json
-
-# Audio temp files
-*.wav
-*.mp3
-
-# Binaries (We download these automatically now)
-bin/
-ffmpeg.exe
-ffplay.exe
-ffprobe.exe
-*.exe
-
-# IDEs
-.vscode/
+models/
 .idea/
+.vscode/
