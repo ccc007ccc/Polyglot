@@ -1,3 +1,4 @@
+# app/config.py
 import os
 import json
 
@@ -16,11 +17,8 @@ if os.path.exists(BIN_DIR):
     os.environ["PATH"] += os.pathsep + BIN_DIR
 
 DEFAULT_CONFIG = {
-    # === 新增：界面语言 (auto, zh_CN, en_US) ===
     "app_lang": "auto",
-
-    # === 新增 SteamVR 配置 ===
-    "enable_steamvr": False, # 默认关闭，由用户开启
+    "enable_steamvr": False,
 
     "api_base": "https://api.deepseek.com",
     "api_key": "",
@@ -35,6 +33,7 @@ DEFAULT_CONFIG = {
     "auto_send": True,
     "sound_cues": True,
     
+    # === PC 悬浮窗设置 ===
     "overlay_x": 100,
     "overlay_y": 100,
     "overlay_width": 500,
@@ -44,6 +43,16 @@ DEFAULT_CONFIG = {
     "overlay_font_size": 14,
     "overlay_locked": False,
     
+    # === VR 悬浮窗设置 (持久化) ===
+    # 默认位置：左手上方 25cm, 前方 35cm
+    "vr_width": 0.4,
+    "vr_matrix": [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.25], 
+        [0.0, 0.0, 1.0, -0.35],
+        [0.0, 0.0, 0.0, 1.0]
+    ],
+
     "tpl_osc": "{zh} | {en}",
     "tpl_display": "原文: {text}\n[CN] {zh}\n[EN] {en}\n[JA] {ja}\n[RU] {ru}",
     "langs": {"zh": True, "en": True, "ja": True, "ru": True, "pinyin": True}
