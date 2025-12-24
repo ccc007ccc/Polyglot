@@ -43,8 +43,7 @@ DEFAULT_CONFIG = {
     "overlay_font_size": 14,
     "overlay_locked": False,
     
-    # === VR 悬浮窗设置 (持久化) ===
-    # 默认位置：左手上方 25cm, 前方 35cm
+    # === VR 悬浮窗设置 ===
     "vr_width": 0.4,
     "vr_matrix": [
         [1.0, 0.0, 0.0, 0.0],
@@ -55,6 +54,19 @@ DEFAULT_CONFIG = {
 
     "tpl_osc": "{zh} | {en}",
     "tpl_display": "原文: {text}\n[CN] {zh}\n[EN] {en}\n[JA] {ja}\n[RU] {ru}",
+    
+    # === 新增：模版存储 ===
+    "templates_osc": {
+        "Default": "{zh} | {en}",
+        "Simple CN": "{zh}",
+        "Bilingual": "{zh} ({en})"
+    },
+    "templates_display": {
+        "Default": "原文: {text}\n[CN] {zh}\n[EN] {en}\n[JA] {ja}\n[RU] {ru}",
+        "Minimal": "{zh}\n{en}",
+        "Debug": "RAW: {text}\nZH: {zh}"
+    },
+
     "langs": {"zh": True, "en": True, "ja": True, "ru": True, "pinyin": True}
 }
 
@@ -73,9 +85,17 @@ class ConfigManager:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     saved = json.load(f)
-                    self.data.update(saved)
+                    # 深度更新字典，防止新key丢失
+                    self._deep_update(self.data, saved)
             except: pass
     
+    def _deep_update(self, target, source):
+        for k, v in source.items():
+            if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                self._deep_update(target[k], v)
+            else:
+                target[k] = v
+
     def save(self):
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:

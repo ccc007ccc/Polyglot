@@ -2,11 +2,12 @@ import threading
 import json
 import requests
 import winsound
+import re  # [New] 引入正则模块
 from pythonosc import udp_client
 from pypinyin import pinyin, Style
 from PySide6.QtCore import QObject, Signal
 from app.config import ConfigManager
-from app.services.lang_service import LanguageService # 导入
+from app.services.lang_service import LanguageService
 
 class TranslationService(QObject):
     finished_signal = Signal(str, str) # osc_msg, display_msg
@@ -16,7 +17,7 @@ class TranslationService(QObject):
         super().__init__()
         self.client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
         self.cfg = ConfigManager()
-        self.ls = LanguageService() # 实例化
+        self.ls = LanguageService()
 
     def process(self, text):
         threading.Thread(target=self._do_process, args=(text,), daemon=True).start()
@@ -24,7 +25,13 @@ class TranslationService(QObject):
     def _get_pinyin(self, text):
         if not text: return ""
         pinyin_list = pinyin(text, style=Style.NORMAL)
-        return " ".join([item[0] for item in pinyin_list])
+        # 原始拼接
+        raw = " ".join([item[0] for item in pinyin_list])
+        # [Fix] 使用正则移除标点符号前的空格
+        # \s+ 匹配一个或多个空格
+        # ([^\w\s]) 捕获非单词且非空白的字符（即标点符号）
+        # r'\1' 替换为捕获到的标点符号本身（即去掉了前面的空格）
+        return re.sub(r'\s+([^\w\s])', r'\1', raw)
 
     def _do_process(self, text):
         try:

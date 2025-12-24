@@ -8,20 +8,22 @@ from PySide6.QtWidgets import (
     QRadioButton, QButtonGroup, QMessageBox,
     QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtCore import Qt, Signal, QSize, QEvent
+from PySide6.QtGui import QColor, QFont, QIcon, QCloseEvent
 
 from app.config import ConfigManager
 from app.ui.theme import Theme
-# 导入新的防滚轮组件
-from app.ui.components import SettingCard, NavButton, StatusBadge, NoScrollComboBox, NoScrollSpinBox, NoScrollSlider
+from app.ui.components import (
+    SettingCard, NavButton, StatusBadge, 
+    NoScrollComboBox, NoScrollSpinBox, NoScrollSlider,
+    TemplateWidget  # 新增
+)
 from app.services.lang_service import LanguageService
 
-# === 快捷键按钮 ===
+# ... [HotkeyButton class remains unchanged, keeping it briefly for context] ...
 class HotkeyButton(QPushButton):
     key_changed = Signal(str)
     reset_signal = Signal()
-
     def __init__(self, default_key, placeholder_text="Press Key..."):
         super().__init__()
         self.current_key = default_key
@@ -32,14 +34,10 @@ class HotkeyButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: #2d2d2d;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: {Theme.COLOR_PRIMARY};
-                font-weight: bold;
+                background-color: #21262d; border: 1px solid {Theme.COLOR_BORDER};
+                border-radius: 6px; padding: 6px 12px; color: {Theme.COLOR_PRIMARY}; font-weight: bold;
             }}
-            QPushButton:hover {{ background-color: #3e3e3e; }}
+            QPushButton:hover {{ border-color: {Theme.COLOR_PRIMARY}; }}
         """)
         self.reset_signal.connect(self._reset_ui)
 
@@ -47,7 +45,7 @@ class HotkeyButton(QPushButton):
         if self.is_recording: return
         self.is_recording = True
         self.setText(self.placeholder_text)
-        self.setStyleSheet(f"background-color: {Theme.COLOR_WARNING}; color: #000; border-radius: 4px;")
+        self.setStyleSheet(f"background-color: {Theme.COLOR_WARNING}; color: #000; border-radius: 6px;")
         threading.Thread(target=self._listen_loop, daemon=True).start()
 
     def _listen_loop(self):
@@ -66,16 +64,12 @@ class HotkeyButton(QPushButton):
         self.setText(f"{self.current_key}")
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: #2d2d2d;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: {Theme.COLOR_PRIMARY};
-                font-weight: bold;
+                background-color: #21262d; border: 1px solid {Theme.COLOR_BORDER};
+                border-radius: 6px; padding: 6px 12px; color: {Theme.COLOR_PRIMARY}; font-weight: bold;
             }}
         """)
 
-# === 悬浮窗类 ===
+# ... [OverlayWindow remains unchanged] ...
 class OverlayWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -178,16 +172,16 @@ class OverlayWindow(QWidget):
             self.cfg.set("overlay_y", self.pos().y())
             self.cfg.save()
 
-# === 主窗口 ===
 class MainWindow(QMainWindow):
     def __init__(self, logic_controller):
         super().__init__()
         self.logic = logic_controller
         self.cfg = ConfigManager()
         self.ls = LanguageService()
+        self.unsaved_changes = False # 脏状态标志
         
         self.setWindowTitle(self.ls.tr("app_title"))
-        self.resize(1000, 750)
+        self.resize(1100, 800)
         
         self.setStyleSheet(Theme.GLOBAL_STYLES)
 
@@ -197,19 +191,19 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # === 1. 左侧导航 ===
+        # === 1. 左侧导航 (美化版) ===
         nav_bar = QWidget()
-        nav_bar.setFixedWidth(200)
-        nav_bar.setStyleSheet(f"background-color: {Theme.COLOR_SURFACE};")
+        nav_bar.setFixedWidth(240)
+        nav_bar.setStyleSheet(f"background-color: {Theme.COLOR_SURFACE}; border-right: 1px solid {Theme.COLOR_BORDER};")
         nav_layout = QVBoxLayout(nav_bar)
-        nav_layout.setContentsMargins(0, 20, 0, 20)
-        nav_layout.setSpacing(10)
+        nav_layout.setContentsMargins(0, 30, 0, 30)
+        nav_layout.setSpacing(12)
 
         lbl_logo = QLabel("POLYGLOT")
         lbl_logo.setAlignment(Qt.AlignCenter)
-        lbl_logo.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {Theme.COLOR_PRIMARY}; letter-spacing: 2px;")
+        lbl_logo.setStyleSheet(f"font-size: 22px; font-weight: 800; color: {Theme.COLOR_PRIMARY}; letter-spacing: 2px; font-family: 'Segoe UI';")
         nav_layout.addWidget(lbl_logo)
-        nav_layout.addSpacing(20)
+        nav_layout.addSpacing(30)
 
         self.btn_home = NavButton(self.ls.tr("nav_dashboard"), "📊")
         self.btn_settings = NavButton(self.ls.tr("nav_settings"), "⚙️")
@@ -224,9 +218,9 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.btn_logs)
         nav_layout.addStretch()
         
-        lbl_ver = QLabel("v2.4 Anti-Scroll")
+        lbl_ver = QLabel("v2.5 Pro")
         lbl_ver.setAlignment(Qt.AlignCenter)
-        lbl_ver.setStyleSheet("color: #555; font-size: 12px;")
+        lbl_ver.setStyleSheet("color: #555; font-size: 11px; font-weight: bold;")
         nav_layout.addWidget(lbl_ver)
 
         main_layout.addWidget(nav_bar)
@@ -234,7 +228,7 @@ class MainWindow(QMainWindow):
         # === 2. 内容区 ===
         content_area = QWidget()
         content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(30, 30, 30, 30)
+        content_layout.setContentsMargins(40, 40, 40, 40)
         content_layout.setSpacing(20)
 
         header_layout = QHBoxLayout()
@@ -268,59 +262,53 @@ class MainWindow(QMainWindow):
         self.btn_settings.setChecked(index == 1)
         self.btn_logs.setChecked(index == 2)
 
-    # --- 仪表盘 ---
     def init_home_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setSpacing(20)
         
         monitor_card = SettingCard(self.ls.tr("card_monitor"))
-        
         self.txt_preview = QTextEdit()
         self.txt_preview.setReadOnly(True)
         self.txt_preview.setPlaceholderText(self.ls.tr("placeholder_monitor"))
         self.txt_preview.setStyleSheet(f"""
-            border: none; 
-            background-color: transparent; 
-            font-size: 16px; 
-            color: {Theme.COLOR_TEXT_MAIN};
+            border: none; background-color: transparent; font-size: 15px; line-height: 1.5; color: {Theme.COLOR_TEXT_MAIN};
         """)
         monitor_card.add_widget(self.txt_preview)
-        
-        layout.addWidget(monitor_card, 2)
+        layout.addWidget(monitor_card, 1)
         
         control_card = SettingCard(self.ls.tr("card_quick_actions"))
         h_layout = QHBoxLayout()
+        h_layout.setSpacing(15)
         
-        self.btn_toggle_mic = QPushButton(self.ls.tr("btn_toggle_rec"))
-        self.btn_toggle_mic.clicked.connect(lambda: self.logic.hotkey.req_toggle_rec.emit())
-        self.btn_toggle_mic.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {Theme.COLOR_PRIMARY}; color: white; border: none; border-radius: 6px; padding: 10px; font-weight: bold;
-            }}
-            QPushButton:hover {{ background-color: #2980b9; }}
-        """)
+        def make_btn(text, color, func):
+            btn = QPushButton(text)
+            btn.clicked.connect(func)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {color}; color: white; border: none; border-radius: 8px; padding: 12px 24px; font-weight: 600; font-size: 14px;
+                }}
+                QPushButton:hover {{ opacity: 0.9; }}
+            """)
+            return btn
         
-        self.btn_force_send = QPushButton(self.ls.tr("btn_force_send"))
-        self.btn_force_send.clicked.connect(lambda: self.logic.hotkey.req_send.emit())
-        self.btn_force_send.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {Theme.COLOR_SURFACE_HOVER}; color: white; border: 1px solid #444; border-radius: 6px; padding: 10px;
-            }}
-            QPushButton:hover {{ background-color: #3e3e3e; }}
-        """)
+        self.btn_toggle_mic = make_btn(self.ls.tr("btn_toggle_rec"), Theme.COLOR_PRIMARY, lambda: self.logic.hotkey.req_toggle_rec.emit())
+        self.btn_force_send = make_btn(self.ls.tr("btn_force_send"), Theme.COLOR_SURFACE_HOVER, lambda: self.logic.hotkey.req_send.emit())
 
         h_layout.addWidget(self.btn_toggle_mic)
         h_layout.addWidget(self.btn_force_send)
+        h_layout.addStretch()
         control_card.add_layout(h_layout)
         
-        layout.addWidget(control_card, 1)
+        layout.addWidget(control_card)
         return page
 
-    # --- 设置页 ---
     def init_settings_page(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -329,42 +317,42 @@ class MainWindow(QMainWindow):
         # 0. 通用/语言
         card_gen = SettingCard(self.ls.tr("card_general"))
         f_gen = QFormLayout()
+        f_gen.setHorizontalSpacing(20)
+        f_gen.setVerticalSpacing(15)
         
-        # 使用 NoScrollComboBox
         self.combo_lang = NoScrollComboBox()
         self.combo_lang.addItem(self.ls.tr("opt_lang_auto"), "auto")
         self.combo_lang.addItem("English", "en_US")
         self.combo_lang.addItem("简体中文", "zh_CN")
-        
-        curr_lang = self.cfg.get("app_lang")
-        idx_lang = self.combo_lang.findData(curr_lang)
+        idx_lang = self.combo_lang.findData(self.cfg.get("app_lang"))
         self.combo_lang.setCurrentIndex(max(0, idx_lang))
+        self.combo_lang.currentIndexChanged.connect(self.mark_dirty) # Dirty Check
         
         f_gen.addRow(self.ls.tr("lbl_interface_lang"), self.combo_lang)
-        f_gen.addRow("", QLabel(f"<font color='gray'>{self.ls.tr('tip_lang_restart')}</font>"))
         card_gen.add_layout(f_gen)
         layout.addWidget(card_gen)
 
         # 1. 核心模型
         card_core = SettingCard(self.ls.tr("card_core"))
         f_core = QFormLayout()
+        f_core.setHorizontalSpacing(20); f_core.setVerticalSpacing(15)
         
-        # 使用 NoScrollComboBox
         self.combo_stt = NoScrollComboBox()
         self.combo_stt.addItem("Faster-Whisper (Offline/Stable)", "faster_whisper")
         self.combo_stt.addItem("FunASR (FunAudioLLM/High-Acc)", "funasr")
         idx = self.combo_stt.findData(self.cfg.get("stt_engine"))
         self.combo_stt.setCurrentIndex(max(0, idx))
+        self.combo_stt.currentIndexChanged.connect(self.mark_dirty)
         
         f_core.addRow(self.ls.tr("lbl_stt_engine"), self.combo_stt)
-        f_core.addRow("", QLabel(f"<font color='gray'>{self.ls.tr('tip_restart')}</font>"))
         card_core.add_layout(f_core)
         layout.addWidget(card_core)
 
         # 2. 音频
         card_audio = SettingCard(self.ls.tr("card_audio"))
         f_audio = QFormLayout()
-        # 使用 NoScrollComboBox
+        f_audio.setHorizontalSpacing(20); f_audio.setVerticalSpacing(15)
+        
         self.combo_mic = NoScrollComboBox()
         devices = self.logic.audio.get_input_devices()
         cur_mic = self.cfg.get("mic_index")
@@ -374,6 +362,8 @@ class MainWindow(QMainWindow):
             self.combo_mic.addItem(f"{idx}: {name}", idx)
             if idx == cur_mic: sel_idx = i + 1
         self.combo_mic.setCurrentIndex(sel_idx)
+        self.combo_mic.currentIndexChanged.connect(self.mark_dirty)
+
         f_audio.addRow(self.ls.tr("lbl_mic"), self.combo_mic)
         card_audio.add_layout(f_audio)
         layout.addWidget(card_audio)
@@ -381,25 +371,26 @@ class MainWindow(QMainWindow):
         # 3. 悬浮窗
         card_overlay = SettingCard(self.ls.tr("card_overlay"))
         g_overlay = QGridLayout()
+        g_overlay.setHorizontalSpacing(20); g_overlay.setVerticalSpacing(15)
         
         self.chk_lock = QCheckBox(self.ls.tr("chk_lock_overlay"))
         self.chk_lock.setChecked(self.cfg.get("overlay_locked"))
         self.chk_lock.toggled.connect(self.update_overlay_style)
+        self.chk_lock.toggled.connect(self.mark_dirty)
         
-        # 使用 NoScrollSpinBox 和 NoScrollSlider
         self.spin_w = NoScrollSpinBox(); self.spin_w.setRange(200, 1920); self.spin_w.setValue(self.cfg.get("overlay_width"))
         self.spin_h = NoScrollSpinBox(); self.spin_h.setRange(50, 1080); self.spin_h.setValue(self.cfg.get("overlay_height"))
-        self.spin_w.valueChanged.connect(self.update_overlay_style)
-        self.spin_h.valueChanged.connect(self.update_overlay_style)
+        self.spin_w.valueChanged.connect(self.update_overlay_style); self.spin_w.valueChanged.connect(self.mark_dirty)
+        self.spin_h.valueChanged.connect(self.update_overlay_style); self.spin_h.valueChanged.connect(self.mark_dirty)
         
         self.slider_opacity = NoScrollSlider(Qt.Horizontal); self.slider_opacity.setRange(10, 100); self.slider_opacity.setValue(int(self.cfg.get("overlay_opacity") * 100))
-        self.slider_opacity.valueChanged.connect(self.update_overlay_style)
+        self.slider_opacity.valueChanged.connect(self.update_overlay_style); self.slider_opacity.valueChanged.connect(self.mark_dirty)
         
         self.slider_border = NoScrollSlider(Qt.Horizontal); self.slider_border.setRange(0, 100); self.slider_border.setValue(int(self.cfg.get("overlay_border_alpha") * 100))
-        self.slider_border.valueChanged.connect(self.update_overlay_style)
+        self.slider_border.valueChanged.connect(self.update_overlay_style); self.slider_border.valueChanged.connect(self.mark_dirty)
         
         self.spin_font = NoScrollSpinBox(); self.spin_font.setRange(10, 60); self.spin_font.setValue(self.cfg.get("overlay_font_size"))
-        self.spin_font.valueChanged.connect(self.update_overlay_style)
+        self.spin_font.valueChanged.connect(self.update_overlay_style); self.spin_font.valueChanged.connect(self.mark_dirty)
 
         g_overlay.addWidget(self.chk_lock, 0, 0)
         g_overlay.addWidget(QLabel(self.ls.tr("lbl_width")), 1, 0); g_overlay.addWidget(self.spin_w, 1, 1)
@@ -411,12 +402,16 @@ class MainWindow(QMainWindow):
         card_overlay.add_layout(g_overlay)
         layout.addWidget(card_overlay)
 
-        # 4. API
+        # 4. API & Templates (重点修改)
         card_api = SettingCard(self.ls.tr("card_api"))
         f_api = QFormLayout()
+        f_api.setHorizontalSpacing(20); f_api.setVerticalSpacing(15)
+        
         self.input_api_base = QLineEdit(self.cfg.get("api_base"))
         self.input_api_key = QLineEdit(self.cfg.get("api_key")); self.input_api_key.setEchoMode(QLineEdit.Password)
         self.input_model = QLineEdit(self.cfg.get("model"))
+        
+        for w in [self.input_api_base, self.input_api_key, self.input_model]: w.textChanged.connect(self.mark_dirty)
         
         f_api.addRow("API Base:", self.input_api_base)
         f_api.addRow("API Key:", self.input_api_key)
@@ -428,51 +423,71 @@ class MainWindow(QMainWindow):
         self.chk_en = QCheckBox("EN"); self.chk_en.setChecked(langs.get("en", True))
         self.chk_ja = QCheckBox("JA"); self.chk_ja.setChecked(langs.get("ja", False))
         self.chk_ru = QCheckBox("RU"); self.chk_ru.setChecked(langs.get("ru", False))
-        l_box.addWidget(self.chk_zh); l_box.addWidget(self.chk_en); l_box.addWidget(self.chk_ja); l_box.addWidget(self.chk_ru)
+        for c in [self.chk_zh, self.chk_en, self.chk_ja, self.chk_ru]: 
+            l_box.addWidget(c)
+            c.toggled.connect(self.mark_dirty)
         l_box.addStretch()
         f_api.addRow(self.ls.tr("lbl_target_lang"), l_box)
         
+        # === 模版区域 ===
         self.txt_tpl_display = QTextEdit()
         self.txt_tpl_display.setPlainText(self.cfg.get("tpl_display"))
-        self.txt_tpl_display.setMaximumHeight(60)
+        self.txt_tpl_display.setMaximumHeight(80)
+        self.txt_tpl_display.textChanged.connect(self.mark_dirty)
+        
+        # 使用 TemplateWidget
+        self.tpl_mgr_disp = TemplateWidget("templates_display", self.txt_tpl_display)
+        self.tpl_mgr_disp.content_changed.connect(self.mark_dirty)
+        
         self.input_tpl_osc = QLineEdit(self.cfg.get("tpl_osc"))
+        self.input_tpl_osc.textChanged.connect(self.mark_dirty)
+        
+        # 使用 TemplateWidget
+        self.tpl_mgr_osc = TemplateWidget("templates_osc", self.input_tpl_osc)
+        self.tpl_mgr_osc.content_changed.connect(self.mark_dirty)
         
         f_api.addRow(self.ls.tr("lbl_tpl_overlay"), self.txt_tpl_display)
+        f_api.addRow("", self.tpl_mgr_disp) # 放在下方
         f_api.addRow(self.ls.tr("lbl_tpl_osc"), self.input_tpl_osc)
+        f_api.addRow("", self.tpl_mgr_osc) # 放在下方
         
         card_api.add_layout(f_api)
         layout.addWidget(card_api)
 
-        # 4.5 SteamVR (New)
+        # 4.5 SteamVR
         card_vr = SettingCard(self.ls.tr("card_steamvr"))
         f_vr = QFormLayout()
         
         self.chk_vr = QCheckBox(self.ls.tr("chk_enable_vr"))
         self.chk_vr.setChecked(self.cfg.get("enable_steamvr"))
-        self.chk_vr.toggled.connect(self.on_vr_toggled) # 连接信号
+        self.chk_vr.toggled.connect(self.on_vr_toggled) 
+        self.chk_vr.toggled.connect(self.mark_dirty)
         
         f_vr.addRow(self.chk_vr)
-        f_vr.addRow(QLabel(f"<font color='gray'>{self.ls.tr('tip_vr_restart')}</font>"))
         card_vr.add_layout(f_vr)
         layout.addWidget(card_vr)
         
         # 5. 快捷键
         card_key = SettingCard(self.ls.tr("card_hotkey"))
         f_key = QFormLayout()
+        f_key.setHorizontalSpacing(20); f_key.setVerticalSpacing(15)
+        
         self.btn_hk_rec = HotkeyButton(self.cfg.get("hotkey_rec"), self.ls.tr("btn_set_hotkey"))
         self.btn_hk_send = HotkeyButton(self.cfg.get("hotkey_send"), self.ls.tr("btn_set_hotkey"))
         
-        self.btn_hk_rec.key_changed.connect(lambda k: self.cfg.set("hotkey_rec", k))
-        self.btn_hk_send.key_changed.connect(lambda k: self.cfg.set("hotkey_send", k))
+        self.btn_hk_rec.key_changed.connect(lambda k: [self.cfg.set("hotkey_rec", k), self.mark_dirty()])
+        self.btn_hk_send.key_changed.connect(lambda k: [self.cfg.set("hotkey_send", k), self.mark_dirty()])
         
         self.rb_hold = QRadioButton(self.ls.tr("opt_hold"))
         self.rb_toggle = QRadioButton(self.ls.tr("opt_toggle"))
         bg = QButtonGroup(self); bg.addButton(self.rb_hold); bg.addButton(self.rb_toggle)
         if self.cfg.get("rec_mode") == "hold": self.rb_hold.setChecked(True)
         else: self.rb_toggle.setChecked(True)
+        self.rb_hold.toggled.connect(self.mark_dirty)
         
         self.chk_auto_send = QCheckBox(self.ls.tr("chk_auto_send"))
         self.chk_auto_send.setChecked(self.cfg.get("auto_send"))
+        self.chk_auto_send.toggled.connect(self.mark_dirty)
         
         f_key.addRow(self.ls.tr("lbl_rec_hotkey"), self.btn_hk_rec)
         f_key.addRow(self.ls.tr("lbl_send_hotkey"), self.btn_hk_send)
@@ -483,38 +498,61 @@ class MainWindow(QMainWindow):
         card_key.add_layout(f_key)
         layout.addWidget(card_key)
 
-        btn_save = QPushButton(self.ls.tr("btn_save"))
-        btn_save.setCursor(Qt.PointingHandCursor)
-        btn_save.setStyleSheet(f"""
+        # 保存按钮区域
+        self.btn_save = QPushButton(self.ls.tr("btn_save"))
+        self.btn_save.setCursor(Qt.PointingHandCursor)
+        self.btn_save.setFixedHeight(50)
+        
+        # [修复] 删除了 'box-shadow' 属性，因为它会导致控制台警告
+        self.btn_save.setStyleSheet(f"""
             QPushButton {{
-                background-color: {Theme.COLOR_SUCCESS}; color: white; border: none; border-radius: 6px; padding: 12px; font-size: 16px; font-weight: bold;
+                background-color: {Theme.COLOR_SUCCESS}; 
+                color: white; border: none; border-radius: 8px; 
+                font-size: 16px; font-weight: bold; letter-spacing: 1px;
             }}
-            QPushButton:hover {{ background-color: #27ae60; }}
+            QPushButton:hover {{ 
+                background-color: #00e676; 
+            }}
+            QPushButton:pressed {{ 
+                background-color: #00a844; 
+            }}
         """)
-        btn_save.clicked.connect(self.save_settings)
-        layout.addWidget(btn_save)
+        
+        self.btn_save.clicked.connect(self.save_settings)
+        layout.addWidget(self.btn_save)
         layout.addStretch()
 
         scroll.setWidget(content)
         return scroll
 
-    # --- 日志 ---
     def init_log_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        
         card = SettingCard(self.ls.tr("nav_logs"))
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
         self.txt_log.setStyleSheet(f"""
-            background-color: #000; color: #0f0; font-family: Consolas, monospace; font-size: 13px; border: none;
+            background-color: #0d1117; color: #7ee787; font-family: Consolas, 'Courier New', monospace; font-size: 12px; border: none;
         """)
         card.add_widget(self.txt_log)
-        
         layout.addWidget(card)
         return page
 
-    # === 逻辑 ===
+    # === 核心逻辑 ===
+
+    def mark_dirty(self):
+        """标记有未保存的更改"""
+        if not self.unsaved_changes:
+            self.unsaved_changes = True
+            self.btn_save.setText(self.ls.tr("btn_save") + " *")
+            self.btn_save.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.COLOR_WARNING}; 
+                    color: #121212; border: none; border-radius: 8px; 
+                    font-size: 16px; font-weight: bold;
+                }}
+            """)
+
     def update_overlay_style(self):
         self.cfg.set("overlay_opacity", self.slider_opacity.value() / 100.0)
         self.cfg.set("overlay_border_alpha", self.slider_border.value() / 100.0)
@@ -527,21 +565,14 @@ class MainWindow(QMainWindow):
     def save_settings(self):
         self.update_overlay_style()
         
-        # === 保存语言设置 ===
-        old_lang = self.cfg.get("app_lang")
-        new_lang = self.combo_lang.currentData()
-        self.cfg.set("app_lang", new_lang)
-        
+        self.cfg.set("app_lang", self.combo_lang.currentData())
         self.cfg.set("api_base", self.input_api_base.text().strip())
         self.cfg.set("api_key", self.input_api_key.text().strip())
         self.cfg.set("model", self.input_model.text().strip())
         self.cfg.set("auto_send", self.chk_auto_send.isChecked())
         self.cfg.set("mic_index", self.combo_mic.currentData())
         self.cfg.set("rec_mode", "hold" if self.rb_hold.isChecked() else "toggle")
-        
-        old_stt = self.cfg.get("stt_engine")
-        new_stt = self.combo_stt.currentData()
-        self.cfg.set("stt_engine", new_stt)
+        self.cfg.set("stt_engine", self.combo_stt.currentData())
         
         langs = {
             "zh": self.chk_zh.isChecked(), "en": self.chk_en.isChecked(),
@@ -554,11 +585,18 @@ class MainWindow(QMainWindow):
         
         self.cfg.save()
         
-        # 检查是否需要提示重启
-        if old_stt != new_stt or old_lang != new_lang:
-            QMessageBox.information(self, "Info", self.ls.tr("msg_restart_needed"))
-        else:
-            self.set_status(self.ls.tr("msg_save_success"), Theme.COLOR_SUCCESS)
+        # 重置脏状态
+        self.unsaved_changes = False
+        self.btn_save.setText(self.ls.tr("btn_save"))
+        self.btn_save.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.COLOR_SUCCESS}; 
+                color: white; border: none; border-radius: 8px; 
+                font-size: 16px; font-weight: bold;
+            }}
+        """)
+        
+        self.set_status(self.ls.tr("msg_save_success"), Theme.COLOR_SUCCESS)
 
     def log(self, text):
         self.txt_log.append(text)
@@ -582,3 +620,24 @@ class MainWindow(QMainWindow):
             self.logic.vr_service.start()
         else:
             self.logic.vr_service.stop()
+
+    # === 退出拦截 ===
+    def closeEvent(self, event: QCloseEvent):
+        if self.unsaved_changes:
+            reply = QMessageBox.question(
+                self, 
+                "Unsaved Changes", 
+                "You have unsaved changes. Do you want to save before exiting?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, 
+                QMessageBox.Save
+            )
+            
+            if reply == QMessageBox.Save:
+                self.save_settings()
+                event.accept()
+            elif reply == QMessageBox.Discard:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
