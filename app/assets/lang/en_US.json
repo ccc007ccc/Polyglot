@@ -69,5 +69,8 @@
     "err_trans_process": "Processing Error: {}",
     "err_general": "Error: {}",
     "log_osc_sent": "📤 OSC Sent",
-    "err_osc_fail": "OSC Failed: {}"
+    "err_osc_fail": "OSC Failed: {}",
+    "card_steamvr": "🥽 SteamVR Integration",
+    "chk_enable_vr": "Enable VR Overlay",
+    "tip_vr_restart": "Requires SteamVR running. Restart App if overlay doesn't appear."
 }

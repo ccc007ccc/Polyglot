@@ -19,6 +19,9 @@ DEFAULT_CONFIG = {
     # === 新增：界面语言 (auto, zh_CN, en_US) ===
     "app_lang": "auto",
 
+    # === 新增 SteamVR 配置 ===
+    "enable_steamvr": False, # 默认关闭，由用户开启
+
     "api_base": "https://api.deepseek.com",
     "api_key": "",
     "model": "deepseek-chat",

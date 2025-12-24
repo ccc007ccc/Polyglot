@@ -69,5 +69,8 @@
     "err_trans_process": "翻译处理错误: {}",
     "err_general": "错误: {}",
     "log_osc_sent": "📤 已发送 OSC",
-    "err_osc_fail": "OSC 发送失败: {}"
+    "err_osc_fail": "OSC 发送失败: {}",
+    "card_steamvr": "🥽 SteamVR 集成",
+    "chk_enable_vr": "启用 VR 覆盖层 (Overlay)",
+    "tip_vr_restart": "需要 SteamVR 正在运行。如未显示请重启程序。"
 }

@@ -442,6 +442,19 @@ class MainWindow(QMainWindow):
         
         card_api.add_layout(f_api)
         layout.addWidget(card_api)
+
+        # 4.5 SteamVR (New)
+        card_vr = SettingCard(self.ls.tr("card_steamvr"))
+        f_vr = QFormLayout()
+        
+        self.chk_vr = QCheckBox(self.ls.tr("chk_enable_vr"))
+        self.chk_vr.setChecked(self.cfg.get("enable_steamvr"))
+        self.chk_vr.toggled.connect(self.on_vr_toggled) # 连接信号
+        
+        f_vr.addRow(self.chk_vr)
+        f_vr.addRow(QLabel(f"<font color='gray'>{self.ls.tr('tip_vr_restart')}</font>"))
+        card_vr.add_layout(f_vr)
+        layout.addWidget(card_vr)
         
         # 5. 快捷键
         card_key = SettingCard(self.ls.tr("card_hotkey"))
@@ -562,3 +575,10 @@ class MainWindow(QMainWindow):
         elif "Trans" in text or "翻译" in text or "识别" in text: ov_color = Theme.COLOR_WARNING
         elif "Error" in text or "错误" in text: ov_color = Theme.COLOR_ERROR
         self.overlay.update_status(text, ov_color)
+
+    def on_vr_toggled(self, checked):
+        self.cfg.set("enable_steamvr", checked)
+        if checked:
+            self.logic.vr_service.start()
+        else:
+            self.logic.vr_service.stop()
