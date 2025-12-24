@@ -72,5 +72,10 @@
     "err_osc_fail": "OSC Failed: {}",
     "card_steamvr": "🥽 SteamVR Integration",
     "chk_enable_vr": "Enable VR Overlay",
-    "tip_vr_restart": "Requires SteamVR running. Restart App if overlay doesn't appear."
+    "tip_vr_restart": "Requires SteamVR running. Restart App if overlay doesn't appear.",
+    "vr_title": "Polyglot VR",
+    "vr_drag_hint": "Drag Header to Move | Drag Corner to Resize",
+    "log_vr_connecting": "Connecting to SteamVR...",
+    "log_vr_success": "SteamVR Overlay Connected",
+    "log_vr_fail": "SteamVR Connection Failed: {}"
 }

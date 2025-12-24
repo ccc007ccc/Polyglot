@@ -72,5 +72,10 @@
     "err_osc_fail": "OSC 发送失败: {}",
     "card_steamvr": "🥽 SteamVR 集成",
     "chk_enable_vr": "启用 VR 覆盖层 (Overlay)",
-    "tip_vr_restart": "需要 SteamVR 正在运行。如未显示请重启程序。"
+    "tip_vr_restart": "需要 SteamVR 正在运行。如未显示请重启程序。",
+    "vr_title": "Polyglot VR",
+    "vr_drag_hint": "按住标题栏拖动 | 右下角调整大小",
+    "log_vr_connecting": "正在尝试连接 SteamVR...",
+    "log_vr_success": "SteamVR Overlay 已成功连接",
+    "log_vr_fail": "SteamVR 连接失败: {}"
 }

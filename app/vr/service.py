@@ -1,3 +1,4 @@
+# app/vr/service.py
 import openvr
 import math
 from OpenGL.GL import *
@@ -9,13 +10,11 @@ from .config import VRConfig
 from .ui.panel import VRPanel
 from .input_handler import VRInputHandler
 
-# === 数学工具类 ===
 class Vector3:
     def __init__(self, x, y, z): self.x, self.y, self.z = x, y, z
     def __add__(self, o): return Vector3(self.x+o.x, self.y+o.y, self.z+o.z)
     def __sub__(self, o): return Vector3(self.x-o.x, self.y-o.y, self.z-o.z)
     def __mul__(self, v): return Vector3(self.x*v, self.y*v, self.z*v)
-    def dot(self, o): return self.x*o.x + self.y*o.y + self.z*o.z
     def length(self): return math.sqrt(self.x**2 + self.y**2 + self.z**2)
     def normalize(self):
         l = self.length()
@@ -37,7 +36,6 @@ def get_matrix_inverse(m):
     ntz = -(r02*tx + r12*ty + r22*tz)
     return [[r00, r10, r20, ntx], [r01, r11, r21, nty], [r02, r12, r22, ntz]]
 
-# === VR 工作线程 ===
 class VRWorker(QObject):
     sig_started = Signal(bool, str)
     sig_input_update = Signal(object, bool)
@@ -53,11 +51,14 @@ class VRWorker(QObject):
         self.texture_id = None
         self.timer = None
         
-        # 设备索引缓存
         self.idx_right_hand = -1
-        self.idx_left_hand = -1
-        self.attached_device_index = -1 # 当前吸附在哪个设备上
-        self.frame_count = 0 # 用于定时检测设备连接
+        self.attached_device_index = -1
+        self.frame_count = 0
+        
+        # [New] 动态位置偏移量 (相对于左手)
+        self.offset = Vector3(0.0, 0.25, -0.35) 
+        # [New] 动态宽度 (缩放)
+        self.width_meters = VRConfig.WIDTH_IN_METERS
 
     @Slot()
     def start_loop(self):
@@ -67,29 +68,24 @@ class VRWorker(QObject):
             self.overlay = openvr.IVROverlay()
             
             if not self._init_opengl():
-                self.sig_started.emit(False, "OpenGL Fail")
+                self.sig_started.emit(False, "OpenGL Init Failed")
                 return
 
             self.overlay_handle = self.overlay.createOverlay(VRConfig.OVERLAY_KEY, VRConfig.OVERLAY_NAME)
-            self.overlay.setOverlayWidthInMeters(self.overlay_handle, VRConfig.WIDTH_IN_METERS)
+            self.overlay.setOverlayWidthInMeters(self.overlay_handle, self.width_meters)
             self.overlay.setOverlayInputMethod(self.overlay_handle, openvr.VROverlayInputMethod_Mouse)
             
-            # 初始位置设置 (尝试寻找左手)
             self._update_attachment()
             self.overlay.showOverlay(self.overlay_handle)
             
             self.running = True
             self.timer = QTimer()
             self.timer.timeout.connect(self._process_frame)
+            self.timer.start(16) # 60 FPS
             
-            # [修改] 60 FPS (1000ms / 60 ≈ 16ms)
-            self.timer.start(16) 
-            
-            self.sig_started.emit(True, "VR Ready (60FPS)")
-            print("[VR Worker] Loop Started")
+            self.sig_started.emit(True, "Connected")
             
         except Exception as e:
-            print(f"[VR Worker] Init Error: {e}")
             self.sig_started.emit(False, str(e))
 
     @Slot()
@@ -101,6 +97,26 @@ class VRWorker(QObject):
                 self.gl_ctx.makeCurrent(self.surface)
                 if self.texture_id: glDeleteTextures([self.texture_id])
             openvr.shutdown()
+        except: pass
+
+    @Slot(float, float)
+    def move_overlay(self, dx, dy):
+        """接收 UI 传来的相对位移"""
+        if not self.running: return
+        # 简单叠加位移
+        self.offset.x += dx
+        self.offset.y += dy
+        # 立即更新位置
+        self._update_attachment(self.attached_device_index)
+
+    @Slot(float)
+    def resize_overlay(self, d_scale):
+        if not self.running: return
+        new_width = self.width_meters + d_scale
+        # 限制范围 (0.1米 ~ 2.0米)
+        self.width_meters = max(0.1, min(new_width, 2.0))
+        try:
+            self.overlay.setOverlayWidthInMeters(self.overlay_handle, self.width_meters)
         except: pass
 
     @Slot(QImage)
@@ -117,33 +133,23 @@ class VRWorker(QObject):
                 tex.eType = openvr.TextureType_OpenGL
                 tex.eColorSpace = openvr.ColorSpace_Auto
                 self.overlay.setOverlayTexture(self.overlay_handle, tex)
-        except Exception as e:
-            print(f"Upload Error: {e}")
+        except: pass
 
     def _process_frame(self):
         if not self.running: return
         try:
             self.frame_count += 1
-            
-            # 每 60 帧 (约1秒) 检查一次左手是否上线，如果上线了就吸附过去
             if self.frame_count % 60 == 0:
                 self._check_devices_and_attach()
 
-            # 1. 寻找右手作为射线源 (Interaction Source)
+            # 寻找右手
             if self.idx_right_hand == -1 or not self.vr_system.isTrackedDeviceConnected(self.idx_right_hand):
                 self._find_right_hand()
-                if self.idx_right_hand == -1: return # 没有右手，无法互动
+                if self.idx_right_hand == -1: return
 
-            # 2. 获取姿态
             poses = self.vr_system.getDeviceToAbsoluteTrackingPose(
                 openvr.TrackingUniverseSeated, 0, openvr.k_unMaxTrackedDeviceCount
             )
-            # 我们需要知道 overlay 当前相对于世界的位置
-            # 因为 overlay 附着在左手(或HMD)上，我们不需要直接读 overlay 的 pose
-            # 而是通过父节点的 pose 来推算，或者更简单的：把射线转换到父节点空间进行相交检测
-            
-            # 获取附着目标 (Parent) 的 Pose
-            # 如果没附着，或者附着失效，默认为 HMD
             target_idx = self.attached_device_index if self.attached_device_index != -1 else openvr.k_unTrackedDeviceIndex_Hmd
             
             target_pose = poses[target_idx]
@@ -151,68 +157,49 @@ class VRWorker(QObject):
 
             if not target_pose.bPoseIsValid or not ctrl_pose.bPoseIsValid: return
 
-            # 3. 坐标转换准备
-            m_target = target_pose.mDeviceToAbsoluteTracking # 左手(或HMD)的世界矩阵
-            m_ctrl = ctrl_pose.mDeviceToAbsoluteTracking     # 右手的世界矩阵
-            inv_target = get_matrix_inverse(m_target)        # 世界 -> 左手空间的逆矩阵
+            # 坐标转换与射线检测
+            m_target = target_pose.mDeviceToAbsoluteTracking
+            m_ctrl = ctrl_pose.mDeviceToAbsoluteTracking
+            inv_target = get_matrix_inverse(m_target)
             
-            # 4. 计算右手射线
-            # [修改] 45度倾角优化
-            # 0度是正前方(0,0,-1)。向下45度: Y = -sin(45), Z = -cos(45)
-            # 0.707
+            # 射线方向：向下倾斜45度
             beam_local = Vector3(0, -0.707, -0.707).normalize()
             
-            # 转为世界坐标
             p_ctrl_world = transform_point(m_ctrl, Vector3(0,0,0))
             p_beam_end_world = transform_point(m_ctrl, beam_local)
             v_beam_world = (p_beam_end_world - p_ctrl_world).normalize()
             
-            # 转为目标(左手)空间坐标
             p_origin_local = transform_point(inv_target, p_ctrl_world)
             p_end_local = transform_point(inv_target, p_ctrl_world + v_beam_world)
             v_dir_local = (p_end_local - p_origin_local).normalize()
             
-            # 5. 射线检测 (在左手空间进行)
-            # 我们定义的窗口位置 (在 _update_attachment 中设置的)
-            if target_idx == openvr.k_unTrackedDeviceIndex_Hmd:
-                plane_z = -1.5 # HMD 模式比较远
-            else:
-                plane_z = -0.35 # [修改] 左手模式：前方 35cm
+            # 使用动态偏移量 offset.z
+            plane_z = self.offset.z
             
-            # 射线与平面 Z = plane_z 求交
             uv_result = None
             is_click = False
 
-            # 注意：如果 v_dir_local.z 接近 0，说明射线平行于屏幕
             if abs(v_dir_local.z) > 1e-6:
                 t = (plane_z - p_origin_local.z) / v_dir_local.z
-                
-                # t > 0 代表向前射击
                 if t > 0:
                     hit_point = p_origin_local + v_dir_local * t
                     
-                    # 检查是否在窗口范围内
-                    # 左手模式下，窗口中心可能还需要 Y 轴偏移
-                    # 在 _update_attachment 中，我们设置了 Y=0.25 (25cm Up)
-                    # 所以检测中心应该是 (0, 0.25, -0.35)
-                    # 我们需要把 hit_point 转换到 "UI 平面坐标系"
+                    # 动态中心点 offset.y, offset.x
+                    center_y = self.offset.y
+                    center_x = self.offset.x
                     
-                    center_y = 0.0 if target_idx == openvr.k_unTrackedDeviceIndex_Hmd else 0.25
-                    
-                    # 相对中心的偏移
-                    dx = hit_point.x - 0.0
+                    dx = hit_point.x - center_x
                     dy = hit_point.y - center_y
                     
-                    half_size = VRConfig.WIDTH_IN_METERS / 2.0
+                    # 动态宽度
+                    half_size = self.width_meters / 2.0
                     
                     if -half_size <= dx <= half_size and -half_size <= dy <= half_size:
-                        # 命中!
-                        u = (dx + half_size) / VRConfig.WIDTH_IN_METERS
-                        v_coord = (dy + half_size) / VRConfig.WIDTH_IN_METERS
+                        u = (dx + half_size) / self.width_meters
+                        v_coord = (dy + half_size) / self.width_meters
                         v_tex = 1.0 - v_coord 
                         uv_result = (u, v_tex)
                         
-                        # 检测扳机
                         state = self.vr_system.getControllerState(self.idx_right_hand)[1]
                         is_click = (state.ulButtonPressed & (1 << openvr.k_EButton_SteamVR_Trigger)) != 0
             
@@ -239,71 +226,59 @@ class VRWorker(QObject):
         return True
 
     def _check_devices_and_attach(self):
-        """检测左手是否上线，如果上线了但没附着，就附着过去"""
         idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_LeftHand)
-        
-        # 如果找到了左手，且当前没附着在左手上 (或者之前附着在 HMD 上)
         if idx != -1 and idx != self.attached_device_index:
-            self._update_attachment(force_left_hand_idx=idx)
-            print(f"[VR Worker] Window attached to Left Hand (ID: {idx})")
+            self._update_attachment(force_idx=idx)
 
-    def _update_attachment(self, force_left_hand_idx=None):
-        """更新窗口附着位置"""
+    def _update_attachment(self, force_idx=None):
         if not self.overlay or not self.overlay_handle: return
         try:
             t = openvr.HmdMatrix34_t()
-            # 基础旋转 (Identity)
-            t.m[0][0]=1.0; t.m[0][1]=0.0; t.m[0][2]=0.0; t.m[0][3]=0.0
-            t.m[1][0]=0.0; t.m[1][1]=1.0; t.m[1][2]=0.0; t.m[1][3]=0.0
-            t.m[2][0]=0.0; t.m[2][1]=0.0; t.m[2][2]=1.0; t.m[2][3]=0.0
+            # Identity
+            for i in range(3):
+                for j in range(4): t.m[i][j] = 0.0
+            t.m[0][0]=1.0; t.m[1][1]=1.0; t.m[2][2]=1.0
             
             target_idx = -1
-            
-            # 1. 尝试附着到左手
-            if force_left_hand_idx:
-                idx = force_left_hand_idx
-            else:
-                idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_LeftHand)
+            if force_idx is not None: idx = force_idx
+            else: idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_LeftHand)
             
             if idx != -1:
-                # === 左手模式配置 ===
-                # 位置：上方 25cm (Y=0.25)，前方 35cm (Z=-0.35)
-                # 这是一个典型的“看表”或“战术板”位置
-                t.m[1][3] = 0.25 
-                t.m[2][3] = -0.35
+                # 使用动态变量
+                t.m[0][3] = self.offset.x
+                t.m[1][3] = self.offset.y 
+                t.m[2][3] = self.offset.z
                 target_idx = idx
                 self.attached_device_index = idx
             else:
-                # === 降级模式：HMD ===
-                # 位置：正前方 1.5m
+                # HMD 默认位置
                 t.m[1][3] = 0.0
                 t.m[2][3] = -1.5
                 target_idx = openvr.k_unTrackedDeviceIndex_Hmd
-                self.attached_device_index = openvr.k_unTrackedDeviceIndex_Hmd # 标记为 HMD
+                self.attached_device_index = openvr.k_unTrackedDeviceIndex_Hmd
             
-            self.overlay.setOverlayTransformTrackedDeviceRelative(
-                self.overlay_handle, target_idx, t
-            )
-            
+            self.overlay.setOverlayTransformTrackedDeviceRelative(self.overlay_handle, target_idx, t)
         except: pass
 
     def _find_right_hand(self):
-        # 寻找射线发射源（优先右手）
         idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_RightHand)
-        if idx != -1: 
-            self.idx_right_hand = idx
-            return
-        # 实在没有右手，用左手当射线源也行（虽然这时候左手如果挂着窗口会很怪）
-        idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_LeftHand)
         if idx != -1: self.idx_right_hand = idx
+        else:
+            idx = self.vr_system.getTrackedDeviceIndexForControllerRole(openvr.TrackedControllerRole_LeftHand)
+            if idx != -1: self.idx_right_hand = idx
 
-# === 主线程服务 ===
 class SteamVRService(QObject):
     req_toggle_rec = Signal()
     req_send = Signal()
+    
+    # [Fix] 新增连接状态信号
+    sig_connection_status = Signal(bool, str)
+    
     _sig_upload_texture = Signal(QImage)
     _sig_stop_worker = Signal()
     _sig_start_worker = Signal()
+    _sig_move_overlay = Signal(float, float)
+    _sig_resize_overlay = Signal(float)
 
     def __init__(self):
         super().__init__()
@@ -311,12 +286,16 @@ class SteamVRService(QObject):
         self.is_running = False
         
         self.panel = VRPanel(VRConfig.WIDTH, VRConfig.HEIGHT)
-        self.panel.resize(VRConfig.WIDTH, VRConfig.HEIGHT)
         self.input_handler = VRInputHandler(self.panel)
         
+        # 连接 Panel 的信号
         self.panel.req_toggle_rec.connect(self.req_toggle_rec)
         self.panel.req_send.connect(self.req_send)
         self.panel.request_repaint.connect(self._on_repaint_requested)
+        
+        # 连接 InputHandler 的拖动信号
+        self.input_handler.req_move_overlay.connect(self._sig_move_overlay)
+        self.input_handler.req_resize_overlay.connect(self._sig_resize_overlay)
         
         self.thread = QThread()
         self.worker = VRWorker()
@@ -325,6 +304,9 @@ class SteamVRService(QObject):
         self._sig_start_worker.connect(self.worker.start_loop)
         self._sig_stop_worker.connect(self.worker.stop)
         self._sig_upload_texture.connect(self.worker.upload_texture)
+        self._sig_move_overlay.connect(self.worker.move_overlay)
+        self._sig_resize_overlay.connect(self.worker.resize_overlay)
+        
         self.worker.sig_started.connect(self._on_worker_started)
         self.worker.sig_input_update.connect(self._on_input_update)
         
@@ -357,9 +339,8 @@ class SteamVRService(QObject):
         self.input_handler.process_manual_raycast(uv, is_click)
 
     def _on_worker_started(self, success, msg):
+        # [Fix] 接收工作线程的准确结果，并转发给主线程
+        self.is_running = success
+        self.sig_connection_status.emit(success, msg)
         if success:
-            print(f"[VR Service] Connection SUCCESS: {msg}")
-            self.is_running = True
             self._on_repaint_requested()
-        else:
-            print(f"[VR Service] Connection FAILED: {msg}")

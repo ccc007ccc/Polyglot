@@ -1,41 +1,74 @@
 # app/vr/ui/panel.py
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSizePolicy
 from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient
 from app.ui.theme import Theme
 from app.services.lang_service import LanguageService
 
 class CursorLayer(QWidget):
-    """
-    专门用于绘制红点的透明层。
-    设置了 WA_TransparentForMouseEvents，保证鼠标穿透，不影响按钮点击。
-    """
+    """专门用于绘制红点的透明层"""
     def __init__(self, parent):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.cursor_pos = QPoint(-1, -1)
-        self.setFixedSize(parent.size()) # 跟随父窗口大小
+        self.setFixedSize(parent.size())
 
     def update_pos(self, x, y):
         self.cursor_pos = QPoint(x, y)
-        self.update() # 仅重绘光标层，开销极小
+        self.update()
 
     def paintEvent(self, event):
         if self.cursor_pos.x() >= 0:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
-            
-            # 绘制红点
             painter.setPen(QPen(Qt.red, 2))
             painter.setBrush(QBrush(QColor(255, 0, 0, 200)))
             painter.drawEllipse(self.cursor_pos, 8, 8)
-            
-            # 绘制十字准星辅助
-            painter.setPen(QPen(QColor(255, 0, 0, 100), 1))
-            cx, cy = self.cursor_pos.x(), self.cursor_pos.y()
-            painter.drawLine(cx - 15, cy, cx + 15, cy)
-            painter.drawLine(cx, cy - 15, cx, cy + 15)
+
+class TitleBar(QLabel):
+    """可拖动的标题栏"""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("VRTitleBar") # 关键 ID
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedHeight(80)
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {Theme.COLOR_SURFACE_HOVER};
+                color: {Theme.COLOR_PRIMARY};
+                font-size: 28px;
+                font-weight: bold;
+                border-top-left-radius: 20px;
+                border-top-right-radius: 20px;
+                border-bottom: 2px solid #444;
+            }}
+            QLabel:hover {{
+                background-color: #3d3d3d;
+                color: white;
+            }}
+        """)
+
+class ResizeHandle(QLabel):
+    """右下角调整大小的手柄"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("VRResizeHandle") # 关键 ID
+        self.setFixedSize(60, 60)
+        self.setStyleSheet("""
+            background-color: transparent;
+        """)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(100, 100, 100), 4)
+        painter.setPen(pen)
+        # 画三条斜线
+        w, h = self.width(), self.height()
+        for i in range(3):
+            offset = i * 10
+            painter.drawLine(w - 5 - offset, h - 5, w - 5, h - 5 - offset)
 
 class VRPanel(QWidget):
     req_toggle_rec = Signal()
@@ -47,12 +80,9 @@ class VRPanel(QWidget):
         self.ls = LanguageService()
         self.setFixedSize(width, height)
         
-        # 样式：加粗边框，高对比度
         self.setStyleSheet(f"""
-            QWidget {{
+            QWidget#VRPanelRoot {{
                 background-color: #121212;
-                color: #ffffff;
-                font-family: "Microsoft YaHei", sans-serif;
                 border: 4px solid #444;
                 border-radius: 24px;
             }}
@@ -66,73 +96,83 @@ class VRPanel(QWidget):
                 padding: 20px;
             }}
             QPushButton:hover {{
-                background-color: #3d3d3d;
                 border-color: {Theme.COLOR_PRIMARY};
+                background-color: #3d3d3d;
             }}
             QPushButton:pressed {{
                 background-color: {Theme.COLOR_PRIMARY};
-                color: #fff;
             }}
-            QLabel {{ border: none; }}
         """)
+        self.setObjectName("VRPanelRoot")
 
-        # === 布局 ===
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(25)
+        # === 主布局 ===
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0) # 贴边
+        self.main_layout.setSpacing(0)
 
-        # Header
-        header = QHBoxLayout()
-        self.lbl_title = QLabel("POLYGLOT VR")
-        self.lbl_title.setStyleSheet(f"font-size: 36px; font-weight: 900; color: {Theme.COLOR_PRIMARY};")
+        # 1. 拖动标题栏
+        self.title_bar = TitleBar(f"⚓ {self.ls.tr('vr_title')}")
+        self.main_layout.addWidget(self.title_bar)
+
+        # 内部容器 (为了留出边距)
+        content_container = QWidget()
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(30, 20, 30, 30)
+        content_layout.setSpacing(20)
+
+        # 2. 状态栏
         self.lbl_status = QLabel("Standby")
-        self.lbl_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.lbl_status.setStyleSheet("font-size: 28px; color: #888; font-weight: bold;")
-        
-        header.addWidget(self.lbl_title)
-        header.addStretch()
-        header.addWidget(self.lbl_status)
-        self.layout.addLayout(header)
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.lbl_status.setStyleSheet("font-size: 24px; color: #888; font-weight: bold;")
+        content_layout.addWidget(self.lbl_status)
 
-        # Line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background-color: #444; border: none; min-height: 3px;")
-        self.layout.addWidget(line)
-
-        # Content
-        self.content_area = QLabel("Waiting for input...")
+        # 3. 文本内容区
+        self.content_area = QLabel("Waiting...")
         self.content_area.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.content_area.setWordWrap(True)
         self.content_area.setStyleSheet("""
-            font-size: 32px; 
+            font-size: 30px; 
             color: #eee; 
-            padding: 25px; 
+            padding: 20px; 
             background-color: #1e1e1e; 
-            border-radius: 16px;
+            border-radius: 12px;
+            border: 1px solid #333;
         """)
-        self.layout.addWidget(self.content_area, 1)
+        content_layout.addWidget(self.content_area, 1)
 
-        # Buttons
+        # 4. 按钮区
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(30)
-        
         self.btn_rec = QPushButton("🎤 REC")
-        self.btn_rec.setMinimumHeight(120)
-        self.btn_rec.setCursor(Qt.PointingHandCursor)
+        self.btn_rec.setMinimumHeight(100)
         self.btn_rec.clicked.connect(self.on_rec_click)
 
         self.btn_send = QPushButton("📤 SEND")
-        self.btn_send.setMinimumHeight(120)
-        self.btn_send.setCursor(Qt.PointingHandCursor)
+        self.btn_send.setMinimumHeight(100)
         self.btn_send.clicked.connect(self.on_send_click)
 
         btn_layout.addWidget(self.btn_rec, 2)
         btn_layout.addWidget(self.btn_send, 1)
-        self.layout.addLayout(btn_layout)
+        content_layout.addLayout(btn_layout)
         
-        # === 关键修复：添加独立的光标层 ===
-        # 它必须作为 self 的子控件，并且最后创建，这样就在最上层
+        self.main_layout.addWidget(content_container, 1)
+
+        # 5. 提示栏 (底部)
+        hint_bar = QHBoxLayout()
+        hint_bar.setContentsMargins(30, 0, 10, 10)
+        self.lbl_hint = QLabel(self.ls.tr("vr_drag_hint"))
+        self.lbl_hint.setStyleSheet("color: #666; font-size: 18px; font-style: italic;")
+        hint_bar.addWidget(self.lbl_hint)
+        hint_bar.addStretch()
+        
+        # 调整大小的手柄 (Overlay 布局)
+        self.resize_handle = ResizeHandle(self)
+        # 手动放置在右下角，不放入 Layout
+        self.resize_handle.move(width - 60, height - 60)
+        self.resize_handle.raise_()
+
+        self.main_layout.addLayout(hint_bar)
+
+        # 6. 光标层 (最上层)
         self.cursor_layer = CursorLayer(self)
         self.cursor_layer.setGeometry(0, 0, width, height)
         self.cursor_layer.raise_()
@@ -147,9 +187,13 @@ class VRPanel(QWidget):
 
     def update_state(self, content_text, status_text, is_recording):
         need_repaint = False
-        if content_text and self.content_area.text() != content_text:
-            if len(content_text) > 250: content_text = content_text[:250] + "..."
-            self.content_area.setText(content_text)
+        
+        # [Sync Fix] 移除多余的换行符和 HTML 清理 (如果需要)
+        clean_text = content_text.strip()
+        if self.content_area.text() != clean_text:
+            # 限制长度防止爆显存
+            if len(clean_text) > 300: clean_text = clean_text[:300] + "..."
+            self.content_area.setText(clean_text)
             need_repaint = True
         
         if status_text not in self.lbl_status.text():
@@ -157,12 +201,12 @@ class VRPanel(QWidget):
 
         if is_recording:
             self.lbl_status.setText(f"● {status_text}")
-            self.lbl_status.setStyleSheet(f"color: {Theme.COLOR_ERROR}; font-weight: bold; font-size: 28px;")
+            self.lbl_status.setStyleSheet(f"color: {Theme.COLOR_ERROR}; font-weight: bold; font-size: 24px;")
             self.btn_rec.setText("STOP")
             self.btn_rec.setStyleSheet(f"background-color: {Theme.COLOR_ERROR}; color: white; border-color: #c0392b;")
         else:
             self.lbl_status.setText(status_text)
-            self.lbl_status.setStyleSheet("color: #888; font-size: 28px;")
+            self.lbl_status.setStyleSheet("color: #888; font-size: 24px;")
             self.btn_rec.setText("🎤 REC")
             self.btn_rec.setStyleSheet("")
             
@@ -170,7 +214,13 @@ class VRPanel(QWidget):
             self.request_repaint.emit()
 
     def set_debug_cursor(self, x, y):
-        # 更新光标层的位置
         self.cursor_layer.update_pos(x, y)
-        # 触发整体重绘 (为了把光标层画到纹理上)
         self.request_repaint.emit()
+        
+    def resizeEvent(self, event):
+        # 确保 resize handle 始终在右下角
+        super().resizeEvent(event)
+        if hasattr(self, 'resize_handle'):
+            self.resize_handle.move(self.width() - 60, self.height() - 60)
+        if hasattr(self, 'cursor_layer'):
+            self.cursor_layer.setGeometry(0, 0, self.width(), self.height())
