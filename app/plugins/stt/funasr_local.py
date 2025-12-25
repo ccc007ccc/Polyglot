@@ -1,53 +1,43 @@
+# app/plugins/stt/funasr_local.py
 import os
-import sys
 import re
 import torch
 import logging
-import requests
-import importlib.util
 import warnings
 import tempfile
 import numpy as np
 import soundfile as sf
+from app.core.interfaces import ISTTEngine
+from app.services.lang_service import LanguageService
 
-# 日志静默处理
+# [SILICON VALLEY OPTIMIZATION] 
+# Import the local model class BEFORE initializing AutoModel.
+# The @tables.register decorator in the imported file handles the registration.
+from app.core.modeling.funasr_nano import FunASRNano 
+
+# Mute Logger
 warnings.filterwarnings("ignore")
 logging.getLogger("transformers").setLevel(logging.CRITICAL)
 logging.getLogger("modelscope").setLevel(logging.CRITICAL)
 logging.getLogger("funasr").setLevel(logging.CRITICAL)
 
-from app.core.interfaces import ISTTEngine
-
 class FunASRSTT(ISTTEngine):
     def __init__(self):
         self.model = None
         self._ready = False
+        self.ls = LanguageService()
         self.lang_map = {
             "zh": "中文", "en": "英文", "ja": "日文", "yue": "粤语", "ko": "韩文",
             "vi": "越南语", "th": "泰语", "ms": "马来语", "id": "印尼语", "ru": "俄语", 
         }
 
-    def _download_file(self, url, save_path):
-        print(f"📥 Downloading: {os.path.basename(save_path)} ...")
-        try:
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            with open(save_path, "wb") as f:
-                f.write(resp.content)
-            print("✅ Download success")
-            return True
-        except Exception as e:
-            print(f"❌ Download failed: {e}")
-            return False
-
     def initialize(self):
-        print("Initializing FunASR Engine...")
+        print("Initializing FunASR Engine (Local Optimized)...")
         try:
-            # 延迟导入
             from modelscope import snapshot_download
             from funasr import AutoModel
         except ImportError:
-            print("❌ Critical Error: Missing dependencies.")
+            print("❌ Critical Error: Missing dependencies (funasr/modelscope).")
             self._ready = False
             return
 
@@ -56,32 +46,17 @@ class FunASRSTT(ISTTEngine):
             print(f"Device: {device}")
 
             model_id = "FunAudioLLM/Fun-ASR-MLT-Nano-2512"
+            
+            # 1. Download/Cache model weights (only weights/config, not code)
             model_dir = snapshot_download(model_id)
             model_dir = os.path.abspath(model_dir)
 
-            # 动态加载 model.py 逻辑保持不变
-            model_py_path = os.path.join(model_dir, "model.py")
-            if not os.path.exists(model_py_path):
-                github_url = "https://raw.githubusercontent.com/FunAudioLLM/Fun-ASR/main/model.py"
-                if not self._download_file(github_url, model_py_path):
-                    self._ready = False
-                    return
-
-            if os.path.exists(model_py_path):
-                try:
-                    if model_dir not in sys.path:
-                        sys.path.insert(0, model_dir)
-                    spec = importlib.util.spec_from_file_location("model", model_py_path)
-                    if spec and spec.loader:
-                        module = importlib.util.module_from_spec(spec)
-                        sys.modules["model"] = module
-                        spec.loader.exec_module(module)
-                except Exception: pass
-
+            # 2. Initialize Model using LOCAL class
+            # trust_remote_code=False ensures we use our app/core/modeling/funasr_nano.py
+            # The registry knows 'FunASRNano' because we imported it above.
             self.model = AutoModel(
                 model=model_dir,
-                trust_remote_code=True,
-                remote_code="model.py",
+                trust_remote_code=False,  # <--- SECURE MODE
                 vad_model="fsmn-vad",
                 vad_kwargs={"max_single_segment_time": 30000},
                 punc_model="ct-punc-c",
@@ -89,8 +64,9 @@ class FunASRSTT(ISTTEngine):
                 disable_update=True,
                 log_level="ERROR"
             )
+            
             self._ready = True
-            print("✅ FunASR Ready")
+            print("✅ FunASR Ready (Local Execution)")
             
         except Exception as e:
             print(f"❌ FunASR Crash: {e}")
@@ -105,13 +81,12 @@ class FunASRSTT(ISTTEngine):
             target_lang = self.lang_map.get(language, "中文")
             input_data = audio_data
 
-            # 兼容处理：如果传入的是 numpy 数组，先写入临时文件
-            # FunASR AutoModel 对内存对象的支持取决于具体版本，文件是最稳妥的
             if isinstance(audio_data, np.ndarray):
+                # FunASR prefers file path for stability in some versions
                 temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 sf.write(temp_file.name, audio_data, 16000)
                 input_data = temp_file.name
-                temp_file.close() # 关闭句柄，让模型去读
+                temp_file.close()
 
             generate_kwargs = {
                 "input": input_data,
@@ -120,10 +95,13 @@ class FunASRSTT(ISTTEngine):
                 "language": target_lang,
                 "itn": True,
             }
+            
+            # The model wrapper will handle the VAD -> ASR -> PUNC pipeline
             res = self.model.generate(**generate_kwargs)
             
             if res and isinstance(res, list) and len(res) > 0:
                 text = res[0].get('text', '')
+                # Clean up repeated punctuation which sometimes happens with Nano models
                 text = re.sub(r'([？?。，,！!])\1+', r'\1', text)
                 return text.strip()
             return ""
@@ -131,7 +109,6 @@ class FunASRSTT(ISTTEngine):
             print(f"FunASR Transcribe Error: {e}")
             return ""
         finally:
-            # 清理临时文件
             if temp_file and os.path.exists(temp_file.name):
                 try: os.remove(temp_file.name)
                 except: pass
