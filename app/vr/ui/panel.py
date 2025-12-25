@@ -30,7 +30,7 @@ class TitleBar(QLabel):
     """可拖动的标题栏"""
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
-        self.setObjectName("VRTitleBar") # 关键 ID
+        self.setObjectName("VRTitleBar")
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(80)
         self.setStyleSheet(f"""
@@ -53,7 +53,7 @@ class ResizeHandle(QLabel):
     """右下角调整大小的手柄"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("VRResizeHandle") # 关键 ID
+        self.setObjectName("VRResizeHandle")
         self.setFixedSize(60, 60)
         self.setStyleSheet("""
             background-color: transparent;
@@ -107,14 +107,14 @@ class VRPanel(QWidget):
 
         # === 主布局 ===
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0) # 贴边
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
         # 1. 拖动标题栏
         self.title_bar = TitleBar(f"⚓ {self.ls.tr('vr_title')}")
         self.main_layout.addWidget(self.title_bar)
 
-        # 内部容器 (为了留出边距)
+        # 内部容器
         content_container = QWidget()
         content_layout = QVBoxLayout(content_container)
         content_layout.setContentsMargins(30, 20, 30, 30)
@@ -156,7 +156,7 @@ class VRPanel(QWidget):
         
         self.main_layout.addWidget(content_container, 1)
 
-        # 5. 提示栏 (底部)
+        # 5. 提示栏
         hint_bar = QHBoxLayout()
         hint_bar.setContentsMargins(30, 0, 10, 10)
         self.lbl_hint = QLabel(self.ls.tr("vr_drag_hint"))
@@ -164,15 +164,12 @@ class VRPanel(QWidget):
         hint_bar.addWidget(self.lbl_hint)
         hint_bar.addStretch()
         
-        # 调整大小的手柄 (Overlay 布局)
         self.resize_handle = ResizeHandle(self)
-        # 手动放置在右下角，不放入 Layout
         self.resize_handle.move(width - 60, height - 60)
         self.resize_handle.raise_()
 
         self.main_layout.addLayout(hint_bar)
 
-        # 6. 光标层 (最上层)
         self.cursor_layer = CursorLayer(self)
         self.cursor_layer.setGeometry(0, 0, width, height)
         self.cursor_layer.raise_()
@@ -188,10 +185,8 @@ class VRPanel(QWidget):
     def update_state(self, content_text, status_text, is_recording):
         need_repaint = False
         
-        # [Sync Fix] 移除多余的换行符和 HTML 清理 (如果需要)
         clean_text = content_text.strip()
         if self.content_area.text() != clean_text:
-            # 限制长度防止爆显存
             if len(clean_text) > 300: clean_text = clean_text[:300] + "..."
             self.content_area.setText(clean_text)
             need_repaint = True
@@ -205,8 +200,13 @@ class VRPanel(QWidget):
             self.btn_rec.setText("STOP")
             self.btn_rec.setStyleSheet(f"background-color: {Theme.COLOR_ERROR}; color: white; border-color: #c0392b;")
         else:
+            # [Fix] 增加对 Init/Busy 等状态的颜色高亮
             self.lbl_status.setText(status_text)
-            self.lbl_status.setStyleSheet("color: #888; font-size: 24px;")
+            if "Init" in status_text or "Load" in status_text or "Wait" in status_text:
+                self.lbl_status.setStyleSheet(f"color: {Theme.COLOR_WARNING}; font-size: 24px; font-weight: bold;")
+            else:
+                self.lbl_status.setStyleSheet("color: #888; font-size: 24px;")
+                
             self.btn_rec.setText("🎤 REC")
             self.btn_rec.setStyleSheet("")
             
@@ -218,7 +218,6 @@ class VRPanel(QWidget):
         self.request_repaint.emit()
         
     def resizeEvent(self, event):
-        # 确保 resize handle 始终在右下角
         super().resizeEvent(event)
         if hasattr(self, 'resize_handle'):
             self.resize_handle.move(self.width() - 60, self.height() - 60)

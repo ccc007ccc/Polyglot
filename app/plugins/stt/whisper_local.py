@@ -1,3 +1,4 @@
+import numpy as np
 from faster_whisper import WhisperModel
 from app.core.interfaces import ISTTEngine
 
@@ -24,13 +25,15 @@ class FasterWhisperSTT(ISTTEngine):
             print(f"Error loading model: {e}")
             self._ready = False
 
-    def transcribe(self, audio_path: str, language: str = "zh") -> str:
+    def transcribe(self, audio_data, language: str = "zh") -> str:
         if not self._ready or not self.model:
             return ""
         
         try:
+            # Faster-Whisper 原生支持 numpy float32 数组
+            # 如果传入的是路径，它也能处理
             segments, _ = self.model.transcribe(
-                audio_path, 
+                audio_data, 
                 beam_size=5, 
                 language=language, 
                 vad_filter=True

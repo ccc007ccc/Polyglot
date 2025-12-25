@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any, Union
 
 class ISTTEngine(ABC):
     """
@@ -11,10 +12,11 @@ class ISTTEngine(ABC):
         pass
 
     @abstractmethod
-    def transcribe(self, audio_path: str, language: str = "zh") -> str:
+    def transcribe(self, audio_data: Union[str, Any], language: str = "zh") -> str:
         """
-        转录音频文件
-        :param audio_path: wav 文件路径
+        转录音频
+        :param audio_data: 文件路径(str) 或 内存音频数据(numpy/bytes)
+        :param language: 目标语言代码
         :return: 识别后的文本
         """
         pass

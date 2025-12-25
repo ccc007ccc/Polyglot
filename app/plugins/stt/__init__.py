@@ -1,5 +1,5 @@
 from .whisper_local import FasterWhisperSTT
-# 懒加载导入，防止如果用户没装 funasr 导致整个程序崩溃（虽然在 requirements 里写了）
+# 懒加载导入，防止如果用户没装 funasr 导致整个程序崩溃
 # 这里我们在工厂方法里动态 import
 
 def create_stt_engine(config_data: dict):
@@ -17,8 +17,10 @@ def create_stt_engine(config_data: dict):
             return FasterWhisperSTT()
 
     # 默认 Faster-Whisper
+    # [Fix] 从配置中读取模型大小
+    size = config_data.get("whisper_model_size", "base")
     return FasterWhisperSTT(
-        model_size="base", 
+        model_size=size, 
         device="cpu",
         compute_type="int8"
     )

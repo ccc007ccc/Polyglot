@@ -23,7 +23,10 @@ DEFAULT_CONFIG = {
     "api_base": "https://api.deepseek.com",
     "api_key": "",
     "model": "deepseek-chat",
+    
+    # === STT 设置 ===
     "stt_engine": "faster_whisper",
+    "whisper_model_size": "base", # [New] 新增模型大小配置
     
     "hotkey_rec": "ctrl+b",
     "hotkey_send": "ctrl+n",
@@ -55,7 +58,6 @@ DEFAULT_CONFIG = {
     "tpl_osc": "{zh} | {en}",
     "tpl_display": "原文: {text}\n[CN] {zh}\n[EN] {en}\n[JA] {ja}\n[RU] {ru}",
     
-    # === 新增：模版存储 ===
     "templates_osc": {
         "Default": "{zh} | {en}",
         "Simple CN": "{zh}",
@@ -85,7 +87,6 @@ class ConfigManager:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     saved = json.load(f)
-                    # 深度更新字典，防止新key丢失
                     self._deep_update(self.data, saved)
             except: pass
     

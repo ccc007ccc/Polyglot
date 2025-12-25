@@ -11,16 +11,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSize, QEvent
 from PySide6.QtGui import QColor, QFont, QIcon, QCloseEvent
 
-from app.config import ConfigManager
 from app.ui.theme import Theme
 from app.ui.components import (
     SettingCard, NavButton, StatusBadge, 
     NoScrollComboBox, NoScrollSpinBox, NoScrollSlider,
-    TemplateWidget  # 新增
+    TemplateWidget
 )
-from app.services.lang_service import LanguageService
 
-# ... [HotkeyButton class remains unchanged, keeping it briefly for context] ...
 class HotkeyButton(QPushButton):
     key_changed = Signal(str)
     reset_signal = Signal()
@@ -69,11 +66,10 @@ class HotkeyButton(QPushButton):
             }}
         """)
 
-# ... [OverlayWindow remains unchanged] ...
 class OverlayWindow(QWidget):
-    def __init__(self):
+    def __init__(self, config_manager):
         super().__init__()
-        self.cfg = ConfigManager()
+        self.cfg = config_manager
         self.base_flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         self.setWindowFlags(self.base_flags)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -173,12 +169,12 @@ class OverlayWindow(QWidget):
             self.cfg.save()
 
 class MainWindow(QMainWindow):
-    def __init__(self, logic_controller):
+    def __init__(self, logic_controller, config_manager, lang_service):
         super().__init__()
         self.logic = logic_controller
-        self.cfg = ConfigManager()
-        self.ls = LanguageService()
-        self.unsaved_changes = False # 脏状态标志
+        self.cfg = config_manager
+        self.ls = lang_service
+        self.unsaved_changes = False 
         
         self.setWindowTitle(self.ls.tr("app_title"))
         self.resize(1100, 800)
@@ -191,7 +187,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # === 1. 左侧导航 (美化版) ===
+        # === 1. 左侧导航 ===
         nav_bar = QWidget()
         nav_bar.setFixedWidth(240)
         nav_bar.setStyleSheet(f"background-color: {Theme.COLOR_SURFACE}; border-right: 1px solid {Theme.COLOR_BORDER};")
@@ -233,7 +229,7 @@ class MainWindow(QMainWindow):
 
         header_layout = QHBoxLayout()
         self.status_badge = StatusBadge()
-        self.status_badge.set_status(self.ls.tr("status_ready"), Theme.COLOR_TEXT_SUB)
+        self.status_badge.set_status(self.ls.tr("status_init"), Theme.COLOR_WARNING)
         header_layout.addWidget(self.status_badge)
         header_layout.addStretch()
         content_layout.addLayout(header_layout)
@@ -253,7 +249,7 @@ class MainWindow(QMainWindow):
         self.btn_home.setChecked(True)
         self.pages.setCurrentIndex(0)
         
-        self.overlay = OverlayWindow()
+        self.overlay = OverlayWindow(self.cfg)
         self.overlay.show()
 
     def switch_page(self, index):
@@ -305,6 +301,13 @@ class MainWindow(QMainWindow):
         return page
 
     def init_settings_page(self):
+        # [Fix] 创建一个主容器，用于放置 ScrollArea 和底部的保存按钮
+        page_container = QWidget()
+        page_layout = QVBoxLayout(page_container)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        # 1. 可滚动区域
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -313,7 +316,10 @@ class MainWindow(QMainWindow):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setSpacing(20)
+        # 增加底部 padding，防止内容被底部悬浮条遮挡
+        layout.setContentsMargins(0, 0, 20, 20) 
 
+        # --- 设置内容开始 ---
         # 0. 通用/语言
         card_gen = SettingCard(self.ls.tr("card_general"))
         f_gen = QFormLayout()
@@ -326,7 +332,7 @@ class MainWindow(QMainWindow):
         self.combo_lang.addItem("简体中文", "zh_CN")
         idx_lang = self.combo_lang.findData(self.cfg.get("app_lang"))
         self.combo_lang.setCurrentIndex(max(0, idx_lang))
-        self.combo_lang.currentIndexChanged.connect(self.mark_dirty) # Dirty Check
+        self.combo_lang.currentIndexChanged.connect(self.mark_dirty)
         
         f_gen.addRow(self.ls.tr("lbl_interface_lang"), self.combo_lang)
         card_gen.add_layout(f_gen)
@@ -343,8 +349,26 @@ class MainWindow(QMainWindow):
         idx = self.combo_stt.findData(self.cfg.get("stt_engine"))
         self.combo_stt.setCurrentIndex(max(0, idx))
         self.combo_stt.currentIndexChanged.connect(self.mark_dirty)
+
+        self.combo_model_size = NoScrollComboBox()
+        sizes = ["tiny", "base", "small", "medium", "large", "large-v3"]
+        for s in sizes:
+            self.combo_model_size.addItem(s.capitalize(), s)
+        
+        idx_size = self.combo_model_size.findData(self.cfg.get("whisper_model_size"))
+        self.combo_model_size.setCurrentIndex(max(0, idx_size))
+        self.combo_model_size.currentIndexChanged.connect(self.mark_dirty)
+
+        def update_size_visibility():
+            is_whisper = self.combo_stt.currentData() == "faster_whisper"
+            self.combo_model_size.setEnabled(is_whisper)
+        
+        self.combo_stt.currentIndexChanged.connect(update_size_visibility)
+        update_size_visibility()
         
         f_core.addRow(self.ls.tr("lbl_stt_engine"), self.combo_stt)
+        f_core.addRow(self.ls.tr("lbl_model_size"), self.combo_model_size)
+        
         card_core.add_layout(f_core)
         layout.addWidget(card_core)
 
@@ -402,7 +426,7 @@ class MainWindow(QMainWindow):
         card_overlay.add_layout(g_overlay)
         layout.addWidget(card_overlay)
 
-        # 4. API & Templates (重点修改)
+        # 4. API & Templates
         card_api = SettingCard(self.ls.tr("card_api"))
         f_api = QFormLayout()
         f_api.setHorizontalSpacing(20); f_api.setVerticalSpacing(15)
@@ -429,27 +453,25 @@ class MainWindow(QMainWindow):
         l_box.addStretch()
         f_api.addRow(self.ls.tr("lbl_target_lang"), l_box)
         
-        # === 模版区域 ===
+        # 模版区域
         self.txt_tpl_display = QTextEdit()
         self.txt_tpl_display.setPlainText(self.cfg.get("tpl_display"))
         self.txt_tpl_display.setMaximumHeight(80)
         self.txt_tpl_display.textChanged.connect(self.mark_dirty)
         
-        # 使用 TemplateWidget
         self.tpl_mgr_disp = TemplateWidget("templates_display", self.txt_tpl_display)
         self.tpl_mgr_disp.content_changed.connect(self.mark_dirty)
         
         self.input_tpl_osc = QLineEdit(self.cfg.get("tpl_osc"))
         self.input_tpl_osc.textChanged.connect(self.mark_dirty)
         
-        # 使用 TemplateWidget
         self.tpl_mgr_osc = TemplateWidget("templates_osc", self.input_tpl_osc)
         self.tpl_mgr_osc.content_changed.connect(self.mark_dirty)
         
         f_api.addRow(self.ls.tr("lbl_tpl_overlay"), self.txt_tpl_display)
-        f_api.addRow("", self.tpl_mgr_disp) # 放在下方
+        f_api.addRow("", self.tpl_mgr_disp)
         f_api.addRow(self.ls.tr("lbl_tpl_osc"), self.input_tpl_osc)
-        f_api.addRow("", self.tpl_mgr_osc) # 放在下方
+        f_api.addRow("", self.tpl_mgr_osc)
         
         card_api.add_layout(f_api)
         layout.addWidget(card_api)
@@ -498,32 +520,39 @@ class MainWindow(QMainWindow):
         card_key.add_layout(f_key)
         layout.addWidget(card_key)
 
-        # 保存按钮区域
+        # --- 设置内容结束 ---
+
+        scroll.setWidget(content)
+        
+        # [Fix] 创建底部固定区域
+        bottom_bar = QWidget()
+        bottom_bar.setStyleSheet(f"background-color: {Theme.COLOR_SURFACE}; border-top: 1px solid {Theme.COLOR_BORDER};")
+        bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(30, 15, 30, 15)
+        
         self.btn_save = QPushButton(self.ls.tr("btn_save"))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setFixedHeight(50)
-        
-        # [修复] 删除了 'box-shadow' 属性，因为它会导致控制台警告
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
                 background-color: {Theme.COLOR_SUCCESS}; 
                 color: white; border: none; border-radius: 8px; 
                 font-size: 16px; font-weight: bold; letter-spacing: 1px;
             }}
-            QPushButton:hover {{ 
-                background-color: #00e676; 
-            }}
-            QPushButton:pressed {{ 
-                background-color: #00a844; 
-            }}
+            QPushButton:hover {{ background-color: #00e676; }}
+            QPushButton:pressed {{ background-color: #00a844; }}
         """)
-        
         self.btn_save.clicked.connect(self.save_settings)
-        layout.addWidget(self.btn_save)
-        layout.addStretch()
+        
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.btn_save)
+        bottom_layout.addStretch() # 让按钮居中，或者去掉这一行让按钮撑满
 
-        scroll.setWidget(content)
-        return scroll
+        # 将组件放入主容器
+        page_layout.addWidget(scroll, 1) # scroll 占满剩余空间
+        page_layout.addWidget(bottom_bar, 0) # bottom_bar 高度自适应
+
+        return page_container
 
     def init_log_page(self):
         page = QWidget()
@@ -538,10 +567,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(card)
         return page
 
-    # === 核心逻辑 ===
-
     def mark_dirty(self):
-        """标记有未保存的更改"""
         if not self.unsaved_changes:
             self.unsaved_changes = True
             self.btn_save.setText(self.ls.tr("btn_save") + " *")
@@ -573,6 +599,7 @@ class MainWindow(QMainWindow):
         self.cfg.set("mic_index", self.combo_mic.currentData())
         self.cfg.set("rec_mode", "hold" if self.rb_hold.isChecked() else "toggle")
         self.cfg.set("stt_engine", self.combo_stt.currentData())
+        self.cfg.set("whisper_model_size", self.combo_model_size.currentData())
         
         langs = {
             "zh": self.chk_zh.isChecked(), "en": self.chk_en.isChecked(),
@@ -585,7 +612,6 @@ class MainWindow(QMainWindow):
         
         self.cfg.save()
         
-        # 重置脏状态
         self.unsaved_changes = False
         self.btn_save.setText(self.ls.tr("btn_save"))
         self.btn_save.setStyleSheet(f"""
@@ -597,6 +623,9 @@ class MainWindow(QMainWindow):
         """)
         
         self.set_status(self.ls.tr("msg_save_success"), Theme.COLOR_SUCCESS)
+        
+        if self.logic:
+            self.logic.on_settings_saved()
 
     def log(self, text):
         self.txt_log.append(text)
@@ -612,6 +641,7 @@ class MainWindow(QMainWindow):
         if "Record" in text or "录音" in text: ov_color = Theme.COLOR_ERROR
         elif "Trans" in text or "翻译" in text or "识别" in text: ov_color = Theme.COLOR_WARNING
         elif "Error" in text or "错误" in text: ov_color = Theme.COLOR_ERROR
+        elif "Init" in text or "初始化" in text or "加载" in text: ov_color = Theme.COLOR_WARNING
         self.overlay.update_status(text, ov_color)
 
     def on_vr_toggled(self, checked):
@@ -621,7 +651,6 @@ class MainWindow(QMainWindow):
         else:
             self.logic.vr_service.stop()
 
-    # === 退出拦截 ===
     def closeEvent(self, event: QCloseEvent):
         if self.unsaved_changes:
             reply = QMessageBox.question(

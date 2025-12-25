@@ -17,24 +17,32 @@ from app.services.lang_service import LanguageService
 from app.vr import SteamVRService 
 
 class AppController:
+    """
+    App Controller (Composition Root)
+    """
     def __init__(self):
         self.app = QApplication(sys.argv)
         qdarktheme.setup_theme("dark")
+        
         self.cfg = ConfigManager()
         self.ls = LanguageService()
         
         self.ffmpeg = FFmpegInstaller()
-        self.audio = AudioService()
-        self.hotkey = HotkeyService()
-        self.translator = TranslationService()
-        
+        self.audio = AudioService(self.cfg, self.ls)
+        self.hotkey = HotkeyService(self.cfg)
+        self.translator = TranslationService(self.cfg, self.ls)
         self.vr_service = SteamVRService()
         
-        self.window = MainWindow(self)
+        self.window = MainWindow(self, self.cfg, self.ls)
         
+        self._bind_signals()
+
+        self.pending_osc = ""
+        self.ffmpeg.start()
+
+    def _bind_signals(self):
         self.ffmpeg.progress_signal.connect(self.window.log)
         self.ffmpeg.finished_signal.connect(self.on_ffmpeg_ready)
-        self.ffmpeg.start()
         
         self.hotkey.req_start_rec.connect(self.on_req_start)
         self.hotkey.req_stop_rec.connect(self.on_req_stop)
@@ -43,32 +51,55 @@ class AppController:
         
         self.vr_service.req_toggle_rec.connect(self.on_req_toggle)
         self.vr_service.req_send.connect(self.on_req_send)
-        # [Fix 1] 连接 VR 状态信号，而非轮询
         self.vr_service.sig_connection_status.connect(self.on_vr_status)
         
         self.audio.log_signal.connect(self.window.log)
-        self.audio.status_signal.connect(self.window.set_status)
+        
+        # [Fix] 更改绑定：不再直接连 window.set_status，而是连到控制器逻辑，
+        # 以便同时分发给 Window 和 VR
+        self.audio.status_signal.connect(self.on_status_changed)
+        
         self.audio.result_signal.connect(self.on_audio_result)
         
         self.translator.finished_signal.connect(self.on_translation_done)
         self.translator.log_signal.connect(self.window.log)
 
-        self.pending_osc = ""
-
     def on_ffmpeg_ready(self, success):
         if success:
             self.window.log(self.ls.tr("log_env_pass"))
-            threading.Thread(target=self.audio.init_engine).start()
+            threading.Thread(target=self.audio.init_engine, daemon=True).start()
         else:
             self.window.log(self.ls.tr("log_env_fail"))
 
-    # [Fix 1] 移除 start_services 中的判断，改为只负责启动
+    # [New] 统一的状态分发中心
+    def on_status_changed(self, text, color):
+        # 1. 更新 PC 界面
+        self.window.set_status(text, color)
+        
+        # 2. 更新 VR 界面 (显示在顶部的状态栏)
+        # 传入 (MainText, StatusText, isRecording)
+        # 这里 MainText 传空字符串表示不改变当前主文本，只更新状态
+        # 但 VRPanel.update_state 逻辑里如果 content_text 变了会重绘
+        # 我们这里取巧一下：
+        # 如果是 "Initializing..." 这种大状态，我们可能希望主文本也显示这个
+        
+        is_busy_state = "Init" in text or "Load" in text or "Wait" in text
+        if is_busy_state:
+            self.vr_service.update_content(text, "BUSY", False)
+        else:
+            # 对于普通状态更新（如 Ready），只更新右上角 Status，不改变主文本
+            # 这里的实现取决于 VRPanel 的逻辑，暂时我们可以只更新 status_text
+            # 为了不覆盖主文本，我们需要 VR Service 支持“保留原文本”
+            # 现有的 update_content 是全覆盖。
+            # 鉴于 init/reload 是重要状态，直接覆盖主文本是合理的。
+            # 而 Ready 状态通常不需要特别显示在主文本区。
+            pass
+
     def start_services(self):
         if self.cfg.get("enable_steamvr"):
             self.window.log(self.ls.tr("log_vr_connecting"))
             self.vr_service.start()
 
-    # [Fix 1] 新增回调处理真实的连接结果
     def on_vr_status(self, success, msg):
         if success:
             self.window.log(self.ls.tr("log_vr_success"))
@@ -76,6 +107,9 @@ class AppController:
             self.window.log(self.ls.tr("log_vr_fail").format(msg))
 
     def on_req_start(self): 
+        if not self.audio.is_ready(): 
+            return
+
         if not self.audio.is_recording:
             msg = self.ls.tr("status_listening")
             self.window.overlay.update_content(msg)
@@ -88,13 +122,13 @@ class AppController:
             self.vr_service.update_content("Processing...", "WAIT", False)
 
     def on_req_toggle(self):
+        if not self.audio.is_ready():
+            return
+            
         if not self.audio.is_recording:
-            msg = self.ls.tr("status_listening")
-            self.window.overlay.update_content(msg)
-            self.vr_service.update_content(msg, "REC", True)
+            self.on_req_start()
         else:
-            self.vr_service.update_content("Processing...", "WAIT", False)
-        self.audio.toggle_record()
+            self.on_req_stop()
 
     def on_req_send(self):
         if self.pending_osc:
@@ -105,13 +139,10 @@ class AppController:
             self.vr_service.update_content(formatted_osc, "SENT", False)
 
     def on_audio_result(self, text):
-        self.window.log(self.ls.tr("log_trans_result").format(text))
-        
-        # [Fix 2] 统一格式，确保 PC 和 VR 看到的内容一致
         preview_text = f"{self.ls.tr('status_translating')}\n{text}"
         
+        self.window.log(self.ls.tr("log_trans_result").format(text))
         self.window.overlay.update_content(preview_text)
-        # 以前是 update_content(text)，现在统一为 preview_text
         self.vr_service.update_content(preview_text, "Transcribing...", False)
         
         self.window.set_status(self.ls.tr("status_translating"), "#f39c12")
@@ -121,7 +152,6 @@ class AppController:
         self.pending_osc = osc_msg
         self.window.log(self.ls.tr("log_trans_complete"))
         
-        # [Fix 2] 统一使用 disp_msg (清洗过的显示文本)
         if self.cfg.get("auto_send"):
             self.translator.send_osc(osc_msg)
             self.window.set_status(self.ls.tr("status_auto_sent"), "#2ecc71")
@@ -131,18 +161,19 @@ class AppController:
             self.vr_service.update_content(formatted_osc, "SENT", False)
         else:
             self.window.overlay.update_content(disp_msg)
-            # 确保 VR 也显示完整的翻译结果
             self.vr_service.update_content(disp_msg, "DONE", False)
             
             send_key = self.cfg.get('hotkey_send')
             self.window.set_status(self.ls.tr("status_wait_send").format(send_key), "#3498db")
 
+    def on_settings_saved(self):
+        threading.Thread(target=self.audio.reload, daemon=True).start()
+
     def run(self):
         self.window.show()
-        # 延迟启动服务，防止 UI 未渲染导致的卡顿
         QTimer.singleShot(1000, self.start_services)
-        
         ret = self.app.exec()
+        
         self.hotkey.stop()
         self.vr_service.stop()
         sys.exit(ret)
